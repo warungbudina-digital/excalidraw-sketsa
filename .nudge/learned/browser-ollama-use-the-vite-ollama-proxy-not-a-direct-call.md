@@ -14,6 +14,27 @@ Start Ollama with: `docker run -d --name ollama -p 11434:11434 -v ~/ollama-data:
 then `docker exec ollama ollama pull qwen2.5-coder:1.5b` (the `-v` volume in $HOME survives
 Cloud Shell session resets). Dev server runs on port 8080 (host:true) for Cloud Shell Web Preview.
 
+### Gotcha: HTTP 403 from the browser even WITH the proxy
+The proxy alone is not enough. Ollama (0.x, e.g. 0.30.10) rejects requests whose `Origin`
+header isn't localhost and returns **HTTP 403** — and the Cloud Shell origin is
+`https://<port>-<hash>.cloudshell.dev`, not localhost. `changeOrigin: true` only rewrites
+the `Host` header, NOT `Origin`, so the browser's Origin is forwarded and rejected. This is
+why a plain `curl` test (no Origin header) returns 200 while the real browser gets 403.
+Fix: strip Origin/Referer in the proxy so Ollama sees a non-browser client:
+```ts
+configure: (proxy) => {
+  proxy.on("proxyReq", (proxyReq) => {
+    proxyReq.removeHeader("origin");
+    proxyReq.removeHeader("referer");
+  });
+}
+```
+Type the proxy object as `Record<string, ProxyOptions>` (import `ProxyOptions` from "vite")
+so `configure`/`proxyReq` get correct contextual types — a hand-written narrow type for the
+`proxy` param fails `tsc` (not assignable to http-proxy `Server`).
+
 ## Verification
-`curl -sf http://localhost:8080/ollama/api/tags` lists the model, and a POST to
-`http://localhost:8080/ollama/api/chat` returns generated EA code in `.message.content`.
+`curl -sf http://localhost:8080/ollama/api/tags` lists the model. To reproduce/confirm the
+403 fix, send the browser's Origin through the proxy:
+`curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/ollama/api/chat -H "Origin: https://8080-x.cloudshell.dev" -H "Content-Type: application/json" -d '{"model":"qwen2.5-coder:1.5b","messages":[{"role":"user","content":"hi"}],"stream":false}'`
+— must return 200 (was 403 before stripping Origin). Also `npm run typecheck` must pass.
