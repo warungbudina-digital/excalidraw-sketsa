@@ -1,0 +1,27 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|WebFetch|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/dina_aryanti12/.local/bin/nudge claude hook",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/dina_aryanti12/.local/bin/nudge claude hook",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

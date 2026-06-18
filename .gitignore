@@ -1,0 +1,12 @@
+node_modules
+dist
+dist-ssr
+*.local
+.vite
+.DS_Store
+npm-debug.log*
+
+# Claude Code local/personal files (keep shared .claude/settings.json, skills, commands)
+.claude/settings.local.json
+*.bak
+*.bak.*
