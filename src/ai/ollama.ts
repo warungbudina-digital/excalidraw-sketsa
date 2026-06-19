@@ -22,12 +22,14 @@ Output ONLY runnable JavaScript. No explanations.
 
 EA API:
 ea.setStyle({ strokeColor, backgroundColor, fillStyle, strokeWidth, strokeStyle, roughness, opacity, fontSize, fontFamily, textAlign })
-ea.addRect(x, y, width, height) -> id
-ea.addEllipse(x, y, width, height) -> id
-ea.addDiamond(x, y, width, height) -> id
-ea.addText(x, y, text) -> id
+ea.addRect(x, y, width, height, label?) -> id     // label? = text auto-centered & BOUND inside the box
+ea.addEllipse(x, y, width, height, label?) -> id  // same: pass a label instead of a separate addText
+ea.addDiamond(x, y, width, height, label?) -> id
+ea.addText(x, y, text) -> id                        // standalone text only (NOT inside a shape)
 ea.addLine(points) -> id     // points: [[x,y], ...]
-ea.addArrow(points) -> id    // points: [[x,y], ...]
+ea.addArrow(points) -> id    // points: [[x,y], ...] — raw, NOT attached to shapes
+ea.connect(fromId, toId, label?) -> id  // arrow BOUND to two shapes (ids from add* above); it
+                                        // follows them when moved. No coordinate math needed.
 ea.addToGroup(ids) -> groupId
 ea.addFrame(name, childIds) -> frameId   // wraps childIds in a named frame, auto-sized
 await ea.addMermaid(definition) -> ids[]  // render a Mermaid diagram (auto layout). PREFER
@@ -62,7 +64,11 @@ Mermaid (ea.addMermaid) — the EASIEST way to draw diagrams; it does the layout
 
 Rules:
 - For ANY flowchart/diagram, PREFER: await ea.addMermaid(\`flowchart TD ...\`); it auto-lays
-  out nodes and arrows. Only hand-place shapes with addRect/addArrow if Mermaid can't express it.
+  out nodes and arrows. Only hand-place shapes if Mermaid can't express it.
+- When hand-placing, put text inside a shape via its label arg — ea.addRect(x,y,w,h,"Mulai") —
+  NOT a separate addText; the label is centered and moves with the box.
+- Connect shapes with ea.connect(a, b) — NOT ea.addArrow with manual points; the arrow binds to
+  both shapes and stays attached. Use addArrow(points) only for free-floating lines.
 - ALWAYS finish with: await ea.addElementsToView();
 - Call ea.setStyle(...) before creating shapes to set colors.
 - Coordinates are pixels; lay elements out so they don't overlap.
@@ -78,17 +84,14 @@ await ea.addMermaid(\`flowchart TD
   C --> E[Selesai]\`);
 await ea.addElementsToView();
 
-Example — same flowchart drawn by hand (only if Mermaid can't express it), wrapped in a frame:
+Example — same flowchart drawn by hand (only if Mermaid can't express it), wrapped in a frame.
+Labels go straight into the shapes and ea.connect makes the arrows bind:
 ea.setStyle({ strokeColor: "#1971c2", backgroundColor: "#a5d8ff" });
-const a = ea.addRect(100, 100, 150, 60);
-const b = ea.addRect(100, 240, 150, 60);
-const c = ea.addRect(100, 380, 150, 60);
-ea.addText(120, 120, "Mulai");
-ea.addText(120, 260, "Proses");
-ea.addText(120, 400, "Selesai");
-ea.setStyle({ strokeColor: "#1e1e1e" });
-ea.addArrow([[175, 160], [175, 240]]);
-ea.addArrow([[175, 300], [175, 380]]);
+const a = ea.addRect(100, 100, 160, 60, "Mulai");
+const b = ea.addRect(100, 260, 160, 60, "Proses");
+const c = ea.addRect(100, 420, 160, 60, "Selesai");
+ea.connect(a, b);
+ea.connect(b, c);
 ea.addFrame("Alur Proses", [a, b, c]);
 await ea.addElementsToView();`;
 

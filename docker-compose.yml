@@ -3,7 +3,7 @@
 #   app         the built web app, served by nginx (reverse-proxies /ollama -> AI backend)
 #   cloudflared Cloudflare Zero Trust tunnel — publishes the app with no inbound ports
 #   ollama      [profile: local] private on-VPS LLM; builds the custom "excalidraw-ea" model
-#   ai-proxy    [profile: cloud] tiny Ollama-compatible shim -> OpenAI Responses API (codex-mini)
+#   ai-proxy    [profile: cloud] tiny Ollama-compatible shim -> OpenAI Responses API (gpt-5-mini)
 #
 # Pick ONE backend with a Compose profile (set COMPOSE_PROFILES + AI_UPSTREAM in .env):
 #   local  -> COMPOSE_PROFILES=local  AI_UPSTREAM=ollama:11434     (private, free, heavier VPS)
@@ -44,7 +44,7 @@ services:
     # Start the server, then pull the base model + build excalidraw-ea from /Modelfile.
     entrypoint: ["/bin/sh", "/entrypoint.sh"]
     environment:
-      BASE_MODEL: qwen2.5-coder:1.5b
+      BASE_MODEL: qwen2.5-coder:3b-instruct
       CUSTOM_MODEL: ${VITE_OLLAMA_MODEL:-excalidraw-ea}
       TZ: ${TZ:-Asia/Jakarta}
     volumes:
@@ -75,7 +75,7 @@ services:
       # backend) since interpolation runs before profile filtering. ai-proxy errors clearly
       # at runtime if it's empty.
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      OPENAI_MODEL: ${OPENAI_MODEL:-codex-mini-latest}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-mini}
       OPENAI_REASONING_EFFORT: ${OPENAI_REASONING_EFFORT:-low}
       TZ: ${TZ:-Asia/Jakarta}
     # No `ports:` — reached only by the app over the compose network (AI_UPSTREAM=ai-proxy:8080).

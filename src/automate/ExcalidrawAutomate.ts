@@ -78,21 +78,61 @@ export class ExcalidrawAutomate {
 
   // --- workbench: create new elements ---------------------------------------
 
-  addRect(x: number, y: number, width: number, height: number): string {
+  /**
+   * Build a skeleton `label` from the current text style. When passed to
+   * `convertToExcalidrawElements` on a container (rect/ellipse/diamond) or an arrow, it
+   * auto-creates a bound, centered text child — no manual coordinates, and the text moves
+   * with its shape. Prefer this over a separate `addText` for text inside a shape.
+   */
+  private labelFor(text: string | undefined): Record<string, unknown> | undefined {
+    if (text === undefined || text === "") {
+      return undefined;
+    }
+    return { label: { text, fontSize: this.style.fontSize } };
+  }
+
+  addRect(x: number, y: number, width: number, height: number, label?: string): string {
     const id = nanoid();
-    this.skeletons.push({ id, type: "rectangle", x, y, width, height, ...this.shapeStyle() });
+    this.skeletons.push({
+      id,
+      type: "rectangle",
+      x,
+      y,
+      width,
+      height,
+      ...this.shapeStyle(),
+      ...this.labelFor(label),
+    });
     return id;
   }
 
-  addEllipse(x: number, y: number, width: number, height: number): string {
+  addEllipse(x: number, y: number, width: number, height: number, label?: string): string {
     const id = nanoid();
-    this.skeletons.push({ id, type: "ellipse", x, y, width, height, ...this.shapeStyle() });
+    this.skeletons.push({
+      id,
+      type: "ellipse",
+      x,
+      y,
+      width,
+      height,
+      ...this.shapeStyle(),
+      ...this.labelFor(label),
+    });
     return id;
   }
 
-  addDiamond(x: number, y: number, width: number, height: number): string {
+  addDiamond(x: number, y: number, width: number, height: number, label?: string): string {
     const id = nanoid();
-    this.skeletons.push({ id, type: "diamond", x, y, width, height, ...this.shapeStyle() });
+    this.skeletons.push({
+      id,
+      type: "diamond",
+      x,
+      y,
+      width,
+      height,
+      ...this.shapeStyle(),
+      ...this.labelFor(label),
+    });
     return id;
   }
 
@@ -135,6 +175,58 @@ export class ExcalidrawAutomate {
       strokeStyle: this.style.strokeStyle,
       roughness: this.style.roughness,
       opacity: this.style.opacity,
+    });
+    return id;
+  }
+
+  /**
+   * Draw an arrow that is BOUND to two shapes created earlier in this run, optionally
+   * labelled. Unlike `addArrow(points)` (raw coordinates), a bound arrow stays attached to
+   * its shapes when they move and needs no manual endpoint math — prefer it for connecting
+   * shapes. `fromId`/`toId` must be ids returned by `addRect`/`addEllipse`/`addDiamond` (or
+   * `addText`) earlier in THIS script run. Returns the arrow id.
+   *
+   * Implementation: we seed the arrow with center-to-center geometry AND a `start`/`end`
+   * binding by id. `convertToExcalidrawElements` turns the bindings into real
+   * startBinding/endBinding (clipped to the shapes' edges at render); the seed points keep
+   * it sane even if a renderer doesn't re-route.
+   */
+  connect(fromId: string, toId: string, label?: string): string {
+    const from = this.skeletons.find((sk) => sk.id === fromId);
+    const to = this.skeletons.find((sk) => sk.id === toId);
+    if (!from || !to) {
+      throw new Error(
+        "connect: fromId/toId must reference shapes created earlier in this script, " +
+          "e.g. const a = ea.addRect(...); const b = ea.addRect(...); ea.connect(a, b);",
+      );
+    }
+    const center = (sk: Skeleton): [number, number] => {
+      const x = Number(sk.x ?? 0);
+      const y = Number(sk.y ?? 0);
+      const w = Number(sk.width ?? 0);
+      const h = Number(sk.height ?? 0);
+      return [x + w / 2, y + h / 2];
+    };
+    const [x1, y1] = center(from);
+    const [x2, y2] = center(to);
+    const id = nanoid();
+    this.skeletons.push({
+      id,
+      type: "arrow",
+      x: x1,
+      y: y1,
+      points: [
+        [0, 0],
+        [x2 - x1, y2 - y1],
+      ],
+      start: { id: fromId },
+      end: { id: toId },
+      strokeColor: this.style.strokeColor,
+      strokeWidth: this.style.strokeWidth,
+      strokeStyle: this.style.strokeStyle,
+      roughness: this.style.roughness,
+      opacity: this.style.opacity,
+      ...this.labelFor(label),
     });
     return id;
   }
