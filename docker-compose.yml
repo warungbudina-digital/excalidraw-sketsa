@@ -1,15 +1,20 @@
-# Excalidraw Sketsa — production stack.
+# Excalidraw Sketsa — production stack with a PLUGGABLE AI backend.
 #
-#   app         the built web app, served by nginx (also reverse-proxies /ollama)
-#   ollama      private LLM backend; auto-builds the custom "excalidraw-ea" model
+#   app         the built web app, served by nginx (reverse-proxies /ollama -> AI backend)
 #   cloudflared Cloudflare Zero Trust tunnel — publishes the app with no inbound ports
+#   ollama      [profile: local] private on-VPS LLM; builds the custom "excalidraw-ea" model
+#   ai-proxy    [profile: cloud] tiny Ollama-compatible shim -> OpenAI Responses API (codex-mini)
+#
+# Pick ONE backend with a Compose profile (set COMPOSE_PROFILES + AI_UPSTREAM in .env):
+#   local  -> COMPOSE_PROFILES=local  AI_UPSTREAM=ollama:11434     (private, free, heavier VPS)
+#   cloud  -> COMPOSE_PROFILES=cloud  AI_UPSTREAM=ai-proxy:8080    (light VPS, needs OPENAI_API_KEY)
 #
 # Quick start:
-#   cp .env.example .env      # then put your Cloudflare tunnel token in it
+#   cp .env.example .env      # set CLOUDFLARE_TUNNEL_TOKEN, COMPOSE_PROFILES, AI_UPSTREAM, ...
 #   docker compose up -d --build
 #
-# Only `app` (optionally) binds a host port; ollama is never exposed, and cloudflared
-# reaches the internet outbound-only. See README "Deploy" for the full walkthrough.
+# The app reaches the backend over the compose network (AI_UPSTREAM); neither backend binds a
+# host port. cloudflared is outbound-only. See README "Deploy" + docs/RUNBOOK.md.
 
 services:
   app:
@@ -17,23 +22,25 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        # Bakes the model name into the bundle; must match the model ollama builds below.
+        # Bakes the model name the browser asks for into the bundle (used by the ollama
+        # backend; ai-proxy ignores it and uses OPENAI_MODEL).
         VITE_OLLAMA_MODEL: ${VITE_OLLAMA_MODEL:-excalidraw-ea}
     image: excalidraw-sketsa:latest
     environment:
-      # Where nginx forwards /ollama -> (compose service name, not localhost).
-      OLLAMA_HOST: ollama:11434
+      # Which backend nginx forwards /ollama/* to. Swap to ai-proxy:8080 for the cloud backend.
+      OLLAMA_HOST: ${AI_UPSTREAM:-ollama:11434}
       TZ: ${TZ:-Asia/Jakarta}
     ports:
       # Host:container. For Cloud Shell use Web Preview on 8080. If you only access the app
       # through the Cloudflare tunnel, you can delete this whole `ports:` block.
       - "${APP_PORT:-8080}:80"
-    depends_on:
-      - ollama
+    # No depends_on the backend: it lives behind a profile, and nginx resolves the upstream at
+    # request time (resolver), so the app starts regardless of which backend is enabled.
     restart: unless-stopped
 
   ollama:
     image: ollama/ollama:latest
+    profiles: ["local"]
     # Start the server, then pull the base model + build excalidraw-ea from /Modelfile.
     entrypoint: ["/bin/sh", "/entrypoint.sh"]
     environment:
@@ -53,6 +60,25 @@ services:
       timeout: 10s
       retries: 5
       start_period: 40s
+    restart: unless-stopped
+
+  ai-proxy:
+    build:
+      context: ./deploy/ai-proxy
+      dockerfile: Dockerfile
+    image: excalidraw-sketsa-ai-proxy:latest
+    profiles: ["cloud"]
+    environment:
+      # Inference runs in OpenAI's cloud, so the key stays here (server-side) — NEVER in the
+      # browser bundle. The app/browser only ever sees same-origin /ollama/*. Soft default
+      # (not `:?`): a hard-required var would break EVERY compose command (incl. the local
+      # backend) since interpolation runs before profile filtering. ai-proxy errors clearly
+      # at runtime if it's empty.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-codex-mini-latest}
+      OPENAI_REASONING_EFFORT: ${OPENAI_REASONING_EFFORT:-low}
+      TZ: ${TZ:-Asia/Jakarta}
+    # No `ports:` — reached only by the app over the compose network (AI_UPSTREAM=ai-proxy:8080).
     restart: unless-stopped
 
   cloudflared:

@@ -1,0 +1,191 @@
+# .nudge.yaml — Konfigurasi Nudge (user-level / project root)
+# Dikonversi dari catatan standar VPS + standar build Docker.
+# Format mengikuti skema Nudge: https://github.com/attunehq/nudge
+# Validasi dengan: `nudge validate`
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# REFERENSI ENVIRONMENT (komentar — bukan rule, hanya catatan)
+#   Platform : Google Cloud Shell (EPHEMERAL — data hilang saat sesi berakhir)
+#   OS       : Ubuntu 24.04.4 LTS, kernel 6.6.137+ x86_64
+#   CPU/RAM  : 2 vCPU Intel Xeon @2.20GHz / 7.8Gi (swap 0)
+#   Disk     : 100G, terpakai 76% (sisa ~23G) — WASPADA kapasitas
+#   Region   : asia-southeast1 (timezone default UTC)
+#   IP       : internal 10.88.0.3 / eksternal 34.142.249.233
+#   Runtime  : Node 24.16, Python 3.12, Go 1.26, PHP 8.3, Ruby 3.2, Java 17
+#   DB       : PostgreSQL 16, MySQL 8, Redis 7, SQLite 3.45
+#   DevOps   : Docker 29.5, Compose v5.1, kubectl, Helm, Terraform, gcloud 571
+#   Port sistem (JANGAN dipakai): 22, 900, 922, 970, 971, 980, 981, 8998
+# ─────────────────────────────────────────────────────────────────────────────
+
+version: 1
+
+rules:
+  # ───────────────────────────────────────────────
+  # STANDAR BUILD — DOCKER MULTI-STAGE
+  # ───────────────────────────────────────────────
+
+  # Pin versi base image — dilarang tag :latest yang tidak deterministik.
+  - name: dockerfile-pin-base-image
+    description: Pin base image ke versi spesifik, jangan pakai :latest
+    message: "Jangan gunakan tag `:latest` pada base image — pin ke versi spesifik (mis. `node:24-alpine`) agar build deterministik, lalu coba lagi."
+    on:
+      - hook: PreToolUse
+        tool: Write
+        file: "**/Dockerfile*"
+        content:
+          - kind: Regex
+            pattern: "(?im)^FROM\\s+\\S+:latest\\b"
+      - hook: PreToolUse
+        tool: Edit
+        file: "**/Dockerfile*"
+        new_content:
+          - kind: Regex
+            pattern: "(?im)^FROM\\s+\\S+:latest\\b"
+
+  # Larang secret literal di-hardcode lewat ENV/ARG di Dockerfile.
+  - name: dockerfile-no-hardcoded-secrets
+    description: Jangan hardcode secret di layer Dockerfile
+    message: "Jangan hardcode secret di Dockerfile (`ENV`/`ARG`). Gunakan build secrets (`--mount=type=secret`) atau runtime env / Secret Manager, lalu coba lagi."
+    on:
+      - hook: PreToolUse
+        tool: Write
+        file: "**/Dockerfile*"
+        content:
+          - kind: Regex
+            pattern: "(?im)^[^\\S\\n]*(ENV|ARG)[^\\S\\n]+\\w*(PASSWORD|SECRET|TOKEN|API_?KEY|PRIVATE_KEY)\\w*[^\\S\\n]*=[^\\S\\n]*\\S"
+      - hook: PreToolUse
+        tool: Edit
+        file: "**/Dockerfile*"
+        new_content:
+          - kind: Regex
+            pattern: "(?im)^[^\\S\\n]*(ENV|ARG)[^\\S\\n]+\\w*(PASSWORD|SECRET|TOKEN|API_?KEY|PRIVATE_KEY)\\w*[^\\S\\n]*=[^\\S\\n]*\\S"
+
+  # Utamakan COPY daripada ADD untuk file lokal.
+  - name: dockerfile-prefer-copy-over-add
+    description: Pakai COPY untuk file lokal, bukan ADD
+    message: "Gunakan `COPY` untuk menyalin file lokal, bukan `ADD`. (Pengecualian: `ADD` untuk URL remote atau auto-extract tar.) Perbaiki lalu coba lagi."
+    on:
+      - hook: PreToolUse
+        tool: Write
+        file: "**/Dockerfile*"
+        content:
+          - kind: Regex
+            pattern: "(?im)^[^\\S\\n]*ADD[^\\S\\n]+"
+      - hook: PreToolUse
+        tool: Edit
+        file: "**/Dockerfile*"
+        new_content:
+          - kind: Regex
+            pattern: "(?im)^[^\\S\\n]*ADD[^\\S\\n]+"
+
+  # Larang EXPOSE port yang sudah dipakai sistem Cloud Shell.
+  - name: dockerfile-avoid-reserved-ports
+    description: Hindari port yang dipakai sistem (900,922,970,971,980,981,8998)
+    message: "Port ini dipakai sistem Cloud Shell (900/922/970/971/980/981/8998). Pilih port aplikasi yang aman (mis. 3000, 8000, 8080), lalu coba lagi."
+    on:
+      - hook: PreToolUse
+        tool: Write
+        file: "**/Dockerfile*"
+        content:
+          - kind: Regex
+            pattern: "(?im)^[^\\S\\n]*EXPOSE[^\\S\\n]+.*\\b(900|922|970|971|980|981|8998)\\b"
+      - hook: PreToolUse
+        tool: Edit
+        file: "**/Dockerfile*"
+        new_content:
+          - kind: Regex
+            pattern: "(?im)^[^\\S\\n]*EXPOSE[^\\S\\n]+.*\\b(900|922|970|971|980|981|8998)\\b"
+
+  # ───────────────────────────────────────────────
+  # KEAMANAN — DETEKSI SECRET DI SOURCE
+  # ───────────────────────────────────────────────
+
+  # Larang AWS access key ter-commit di source.
+  - name: no-aws-access-key
+    description: Jangan commit AWS access key ke source
+    message: "Terdeteksi pola AWS access key (`AKIA...`). Pindahkan ke environment variable / Secret Manager, jangan tulis di file, lalu coba lagi."
+    on:
+      - hook: PreToolUse
+        tool: Write
+        file: "**/*"
+        content:
+          - kind: Regex
+            pattern: "AKIA[0-9A-Z]{16}"
+      - hook: PreToolUse
+        tool: Edit
+        file: "**/*"
+        new_content:
+          - kind: Regex
+            pattern: "AKIA[0-9A-Z]{16}"
+
+  # Larang Google API key ter-commit di source.
+  - name: no-google-api-key
+    description: Jangan commit Google API key ke source
+    message: "Terdeteksi pola Google API key (`AIza...`). Pindahkan ke environment variable / Secret Manager, jangan tulis di file, lalu coba lagi."
+    on:
+      - hook: PreToolUse
+        tool: Write
+        file: "**/*"
+        content:
+          - kind: Regex
+            pattern: "AIza[0-9A-Za-z_\\-]{35}"
+      - hook: PreToolUse
+        tool: Edit
+        file: "**/*"
+        new_content:
+          - kind: Regex
+            pattern: "AIza[0-9A-Za-z_\\-]{35}"
+
+  # Larang private key block ter-commit di source.
+  - name: no-private-key-in-source
+    description: Jangan commit private key ke source
+    message: "Terdeteksi blok PRIVATE KEY. Jangan simpan kunci privat di repo — gunakan Secret Manager, lalu coba lagi."
+    on:
+      - hook: PreToolUse
+        tool: Write
+        file: "**/*"
+        content:
+          - kind: Regex
+            pattern: "-----BEGIN [A-Z ]*PRIVATE KEY-----"
+      - hook: PreToolUse
+        tool: Edit
+        file: "**/*"
+        new_content:
+          - kind: Regex
+            pattern: "-----BEGIN [A-Z ]*PRIVATE KEY-----"
+
+  # ───────────────────────────────────────────────
+  # REMINDER PROMPT-TIME (inject konteks saat relevan)
+  # ───────────────────────────────────────────────
+
+  # Saat user membahas Docker/build image — ingatkan standar multi-stage.
+  - name: docker-multistage-reminder
+    description: Ingatkan standar build multi-stage saat membahas Docker image
+    message: |
+      Standar build Docker repo ini:
+      - WAJIB multi-stage: pisahkan stage BUILD (compiler/toolchain) dari stage RUNTIME (hanya artefak).
+      - Base runtime minimal: `alpine` (~5MB) atau `scratch` untuk binary statis (Go/Rust); pertimbangkan distroless.
+      - Target ukuran image production: 10-20MB (alpine) / <10MB (scratch); tolak image monolith >500MB.
+      - Pin versi base image (jangan `:latest`); urutkan COPY dependency dulu (cache layer); sediakan `.dockerignore`.
+      - Tambahkan HEALTHCHECK dan scan vuln (mis. `trivy image <nama>`) sebelum deploy.
+    on:
+      - hook: UserPromptSubmit
+        prompt:
+          - kind: Regex
+            pattern: "(?i)(dockerfile|docker\\s*image|build.*image|containeriz|dockeriz|multi-?stage)"
+
+  # Saat user membahas deploy/produksi — ingatkan kondisi & SOP VPS.
+  - name: deploy-checklist-reminder
+    description: Ingatkan SOP pra-deploy & batasan environment VPS
+    message: |
+      Checklist pra-deploy environment ini (Google Cloud Shell, EPHEMERAL):
+      - Disk sudah ~76% penuh (sisa ~23G) & TIDAK ada swap — kecilkan image, hati-hati app berat (risiko OOM).
+      - Set GCP project dulu: `gcloud config set project <ID>` (saat ini belum diset).
+      - Commit semua kode ke Git — disk ephemeral, kerja lokal hilang saat sesi berakhir.
+      - Timezone default UTC; set `Asia/Jakarta` bila app butuh WIB.
+      - Jangan pakai port sistem: 22, 900, 922, 970, 971, 980, 981, 8998.
+    on:
+      - hook: UserPromptSubmit
+        prompt:
+          - kind: Regex
+            pattern: "(?i)(deploy|deploy ke|production|produksi|go.?live|rilis|cloud run|gke|app engine)"

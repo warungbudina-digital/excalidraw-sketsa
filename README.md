@@ -165,14 +165,17 @@ container running (above); everything else works without it.
 
 ## Deploy (Docker + Cloudflare Tunnel)
 
-The repo ships a 3-service stack that builds the app, runs Ollama privately, and exposes
-the app over a **Cloudflare Zero Trust tunnel** (no inbound ports, no public IP):
+The repo ships a stack that builds the app, exposes it over a **Cloudflare Zero Trust
+tunnel** (no inbound ports, no public IP), and lets you pick the **AI backend**:
 
 | Service | What it does |
 |---|---|
-| `app` | Multi-stage build (Node → `nginx:alpine`); serves the static build and reverse-proxies `/ollama` (Origin/Referer stripped, like the dev proxy). |
-| `ollama` | Private LLM backend. Auto-pulls `qwen2.5-coder:1.5b` and builds the `excalidraw-ea` model from `Modelfile`. Never publishes a port. |
+| `app` | Multi-stage build (Node → `nginx:alpine`); serves the static build and reverse-proxies `/ollama` (Origin/Referer stripped, like the dev proxy) to the chosen backend. |
 | `cloudflared` | Cloudflare tunnel; reaches `app:80` over the compose network and publishes it via your Zero Trust hostname. |
+| `ollama` *(profile `local`)* | Private on-VPS LLM. Auto-pulls `qwen2.5-coder:1.5b` and builds `excalidraw-ea` from `Modelfile`. Never publishes a port. |
+| `ai-proxy` *(profile `cloud`)* | Tiny Ollama-compatible shim → OpenAI **Responses API** (`codex-mini-latest`). Offloads inference to the cloud; the API key stays server-side. |
+
+See [**AI backend**](#ai-backend-local-ollama-vs-cloud-codex-mini) below to choose between them.
 
 ### 1. Create the tunnel
 
@@ -191,6 +194,33 @@ First boot pulls the base model (~1 GB into `~/ollama-data`, re-used afterwards)
 is then reachable at your Cloudflare hostname; locally it's on `http://localhost:8080`
 (Cloud Shell: **Web Preview → 8080**). Building `excalidraw-ea` adds almost no disk — the
 custom model shares the base weights.
+
+### AI backend: local Ollama vs cloud codex-mini
+
+The backend is pluggable via `.env` — the browser app is unchanged either way (it always
+calls same-origin `/ollama/*`; `ai-proxy` speaks the same Ollama dialect):
+
+| | `local` (Ollama) | `cloud` (codex-mini) |
+|---|---|---|
+| Inference | on the VPS (CPU) | OpenAI cloud — VPS stays light |
+| Instruction-following | modest (1.5b) | strong (`codex-mini-latest`, an o4-mini reasoning model) |
+| Cost / privacy | free, fully private | per-token (cheap) + prompts go to OpenAI |
+| Needs | ~2 GB RAM + ~1 GB disk | `OPENAI_API_KEY` |
+
+```bash
+# Local (default): private on-VPS Ollama
+COMPOSE_PROFILES=local   AI_UPSTREAM=ollama:11434      # in .env
+docker compose up -d --build
+
+# Cloud: OpenAI codex-mini via ai-proxy
+COMPOSE_PROFILES=cloud   AI_UPSTREAM=ai-proxy:8080      # in .env
+OPENAI_API_KEY=sk-...                                  # in .env
+docker compose up -d --build
+docker compose up -d --build app   # recreate app so nginx picks up the new upstream
+```
+
+The system prompt (EA + frames + Mermaid knowledge) is sent by the app, so it applies to
+**either** backend; `codex-mini` follows it far more reliably than the 1.5b model.
 
 ### Files
 

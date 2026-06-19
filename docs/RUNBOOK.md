@@ -127,6 +127,25 @@ docker compose up -d app
 docker compose up -d cloudflared
 ```
 
+### AI backend: local Ollama ↔ cloud codex-mini
+
+The AI backend is pluggable; the app is unchanged either way (it always calls same-origin
+`/ollama/*`, and `ai-proxy` speaks the same Ollama dialect). Choose with two `.env` vars:
+
+```bash
+# Local: private on-VPS Ollama (default)
+COMPOSE_PROFILES=local   AI_UPSTREAM=ollama:11434
+
+# Cloud: OpenAI codex-mini via ai-proxy (light VPS, strong instruction-following)
+COMPOSE_PROFILES=cloud   AI_UPSTREAM=ai-proxy:8080
+OPENAI_API_KEY=sk-...                 # server-side only; never in the browser bundle
+```
+
+After editing `.env`: `docker compose up -d --build` then `docker compose up -d --build app`
+(recreates the app so nginx picks up the new `AI_UPSTREAM`). Switching to `cloud` stops
+running on-VPS inference entirely; prompts then go to OpenAI (privacy/cost trade-off).
+`OPENAI_API_KEY` uses a soft default in compose, so the **local** backend never needs it.
+
 ---
 
 ## 6. Verify
