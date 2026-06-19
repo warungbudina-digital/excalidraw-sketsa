@@ -30,6 +30,8 @@ ea.addLine(points) -> id     // points: [[x,y], ...]
 ea.addArrow(points) -> id    // points: [[x,y], ...]
 ea.addToGroup(ids) -> groupId
 ea.addFrame(name, childIds) -> frameId   // wraps childIds in a named frame, auto-sized
+await ea.addMermaid(definition) -> ids[]  // render a Mermaid diagram (auto layout). PREFER
+                                          // this for any flowchart/diagram.
 ea.getViewElements() -> elements[]
 ea.getViewSelectedElements() -> elements[]   // elements have id, type, x, y, width, height, strokeColor, fontSize, text
 ea.copyViewElementsToEAforEditing(elements)  // required before mutating existing scene elements
@@ -49,7 +51,18 @@ Excalidraw model (what the elements ARE):
 - frame is a container: child elements set frameId = the frame's id. The colors above don't
   apply to it — give it a name. ea.addFrame handles ids, sizing and ordering for you.
 
+Mermaid (ea.addMermaid) — the EASIEST way to draw diagrams; it does the layout for you:
+- Write a Mermaid FLOWCHART; it becomes real, editable shapes + arrows. Other diagram types
+  (sequence, gantt, class, pie, ...) still work but come back as a static IMAGE, not shapes.
+- Flowchart syntax: first line "flowchart TD" (top-down) or "flowchart LR" (left-right).
+  Nodes: A[Rect]  B(Rounded)  C{Diamond/decision}  D((Circle))  E([Stadium]).
+  Edges: A --> B (arrow), A --- B (line), A -.-> B (dotted), A ==> B (thick),
+         A -->|label| B (labelled). A node id is reused to connect it again.
+  Group: "subgraph Title ... end" becomes a frame around those nodes.
+
 Rules:
+- For ANY flowchart/diagram, PREFER: await ea.addMermaid(\`flowchart TD ...\`); it auto-lays
+  out nodes and arrows. Only hand-place shapes with addRect/addArrow if Mermaid can't express it.
 - ALWAYS finish with: await ea.addElementsToView();
 - Call ea.setStyle(...) before creating shapes to set colors.
 - Coordinates are pixels; lay elements out so they don't overlap.
@@ -57,7 +70,15 @@ Rules:
 - To group visually inside a labelled box, prefer ea.addFrame(name, [ids]) over addToGroup.
 - Pass real shape ids to addFrame: const a = ea.addRect(...); ea.addFrame("Grup", [a]);
 
-Example — flowchart of 3 boxes connected by arrows, wrapped in a frame:
+Example — flowchart via Mermaid (PREFERRED), then commit:
+await ea.addMermaid(\`flowchart TD
+  A[Mulai] --> B{Valid?}
+  B -->|ya| C[Proses]
+  B -->|tidak| D[Tolak]
+  C --> E[Selesai]\`);
+await ea.addElementsToView();
+
+Example — same flowchart drawn by hand (only if Mermaid can't express it), wrapped in a frame:
 ea.setStyle({ strokeColor: "#1971c2", backgroundColor: "#a5d8ff" });
 const a = ea.addRect(100, 100, 150, 60);
 const b = ea.addRect(100, 240, 150, 60);

@@ -61,8 +61,9 @@ await ea.addElementsToView();
 ```
 
 EA API (subset): `setStyle`, `addRect`, `addEllipse`, `addDiamond`, `addText`, `addLine`,
-`addArrow`, `addToGroup`, `addFrame`, `getViewElements`, `getViewSelectedElements`,
-`copyViewElementsToEAforEditing`, `getElements`, `clear`, `addElementsToView`.
+`addArrow`, `addToGroup`, `addFrame`, `addMermaid`, `getViewElements`,
+`getViewSelectedElements`, `copyViewElementsToEAforEditing`, `getElements`, `clear`,
+`addElementsToView`.
 `utils`: `inputPrompt`, `suggester`.
 
 #### Frames
@@ -81,6 +82,25 @@ Frame membership is by reference — each child sets `frameId` to the frame's id
 per the [Excalidraw frames spec](https://docs.excalidraw.com/docs/codebase/frames),
 **children are emitted before the frame element** in the elements array (the renderer
 relies on that ordering for clipping). EA handles the ids, sizing, and ordering for you.
+
+#### Mermaid
+
+`await ea.addMermaid(definition)` renders a [Mermaid](https://mermaid.js.org/) diagram into
+the scene via [`@excalidraw/mermaid-to-excalidraw`](https://docs.excalidraw.com/docs/@excalidraw/mermaid-to-excalidraw/codebase/parser),
+so you get automatic layout instead of placing shapes by hand:
+
+```js
+await ea.addMermaid(`flowchart TD
+  A[Mulai] --> B{Valid?}
+  B -->|ya| C[Proses]
+  B -->|tidak| D[Tolak]`);
+await ea.addElementsToView();
+```
+
+**Flowcharts** become real, editable shapes + arrows (`subgraph`s become frames). Every
+other diagram type is inserted as a single static **image** (returned in `files`) — see the
+[supported-types note](https://docs.excalidraw.com/docs/@excalidraw/mermaid-to-excalidraw/codebase/new-diagram-type).
+It is async and browser-only (Mermaid renders through the DOM). Returns the created element ids.
 
 ## Login
 

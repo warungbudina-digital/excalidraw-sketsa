@@ -11,7 +11,7 @@
  */
 import { convertToExcalidrawElements } from "@excalidraw/excalidraw";
 import { nanoid } from "nanoid";
-import type { ExcalidrawApi, SceneElement } from "../types";
+import type { ExcalidrawApi, SceneElement, SceneFiles } from "../types";
 
 export interface EAStyle {
   strokeColor: string;
@@ -50,6 +50,10 @@ export class ExcalidrawAutomate {
   private api: ExcalidrawApi;
   private skeletons: Skeleton[] = [];
   private editDict: Record<string, SceneElement> = {};
+  // Already-converted elements (e.g. Mermaid output) staged outside the skeleton pipeline.
+  private prebuilt: SceneElement[] = [];
+  // Binary files (e.g. the image for an unsupported Mermaid diagram) to register on commit.
+  private pendingFiles: SceneFiles = {};
 
   constructor(api: ExcalidrawApi) {
     this.api = api;
@@ -178,6 +182,41 @@ export class ExcalidrawAutomate {
     return id;
   }
 
+  /**
+   * Render a Mermaid diagram into the scene. The Mermaid text is parsed by
+   * `@excalidraw/mermaid-to-excalidraw` into Excalidraw element skeletons, converted, and
+   * staged like any other workbench output (committed by {@link addElementsToView}).
+   *
+   * Only **flowcharts** become real, editable shapes + arrows (subgraphs become frames);
+   * every other diagram type comes back as a single static **image** (added via files).
+   * Returns the ids of the created elements.
+   *
+   * Async and browser-only — Mermaid renders through the DOM. Usage:
+   * `await ea.addMermaid("flowchart TD\n A[Mulai] --> B{OK?}");`
+   */
+  async addMermaid(definition: string): Promise<string[]> {
+    // Lazy-import so Mermaid (heavy) only loads when actually used.
+    const { parseMermaidToExcalidraw } = await import("@excalidraw/mermaid-to-excalidraw");
+    let result: { elements: unknown[]; files?: Record<string, unknown> };
+    try {
+      result = await parseMermaidToExcalidraw(definition, {
+        themeVariables: { fontSize: `${this.style.fontSize}px` },
+      });
+    } catch (e) {
+      throw new Error(`Mermaid tidak valid — ${(e as Error).message}`);
+    }
+    // regenerateIds: true — Mermaid ids are self-contained (bindings/frameId are remapped
+    // consistently by convert), and fresh ids avoid colliding with the scene or a 2nd call.
+    const converted = convertToExcalidrawElements(result.elements as never, {
+      regenerateIds: true,
+    }) as unknown as SceneElement[];
+    this.prebuilt.push(...converted);
+    if (result.files) {
+      Object.assign(this.pendingFiles, result.files);
+    }
+    return converted.map((el) => el.id);
+  }
+
   // --- workbench: read / edit existing scene elements -----------------------
 
   getViewElements(): readonly SceneElement[] {
@@ -220,12 +259,14 @@ export class ExcalidrawAutomate {
         }
       }
     }
-    return [...converted, ...Object.values(this.editDict)];
+    return [...converted, ...Object.values(this.editDict), ...this.prebuilt];
   }
 
   clear(): void {
     this.skeletons = [];
     this.editDict = {};
+    this.prebuilt = [];
+    this.pendingFiles = {};
   }
 
   // --- commit ---------------------------------------------------------------
@@ -253,6 +294,12 @@ export class ExcalidrawAutomate {
       if (!used.has(el.id)) {
         merged.push(el);
       }
+    }
+
+    // Register any binary files (e.g. a Mermaid image) before the scene references them.
+    const files = Object.entries(this.pendingFiles);
+    if (files.length > 0 && this.api.addFiles) {
+      this.api.addFiles(files.map(([id, f]) => ({ id, ...(f as object) })));
     }
 
     this.api.updateScene({ elements: merged });

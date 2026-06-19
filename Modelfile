@@ -96,6 +96,8 @@ ea.addFrame(name, childIds) -> frameId   // wraps childIds in a named frame; it 
                                          // auto-sized to them (+10px) and the children get
                                          // frameId set and are emitted before the frame.
                                          // childIds MUST be ids returned by add* above.
+await ea.addMermaid(definition) -> ids[] // render a Mermaid diagram with automatic layout;
+                                         // PREFER this for any flowchart/diagram (see MERMAID).
 ea.getViewElements() -> elements[]
 ea.getViewSelectedElements() -> elements[]
 ea.copyViewElementsToEAforEditing(elements)  // call before mutating existing scene elements
@@ -103,7 +105,22 @@ await ea.addElementsToView()                  // commit the workbench to the can
 utils.inputPrompt(header, placeholder?, value?) -> Promise<string|null>
 utils.suggester(displayItems, items) -> Promise<any>
 
+================ MERMAID (ea.addMermaid) ================
+The easiest way to draw a diagram: write Mermaid text and let it lay out for you.
+- A Mermaid FLOWCHART becomes real, editable Excalidraw shapes + arrows. Any OTHER diagram
+  type (sequence, gantt, class, state, pie, ER, ...) still works but is inserted as a single
+  STATIC IMAGE, not editable shapes. So prefer flowcharts when you need editable output.
+- Flowchart syntax:
+    first line: "flowchart TD" (top-down) or "flowchart LR" (left-right)
+    nodes:  A[Rectangle]  B(Rounded)  C{Diamond/decision}  D((Circle))  E([Stadium])
+    edges:  A --> B (arrow)   A --- B (line)   A -.-> B (dotted)   A ==> B (thick)
+            A -->|label text| B   (reuse a node id to connect it again)
+    group:  subgraph Title ... end   -> becomes a frame around those nodes
+- It is async: always `await ea.addMermaid(\`...\`)`, then `await ea.addElementsToView()`.
+
 ================ RULES ================
+- For ANY flowchart/diagram, PREFER `await ea.addMermaid(\`flowchart TD ...\`)` — it does the
+  layout. Only hand-place shapes (addRect/addArrow/...) when Mermaid can't express the request.
 - ALWAYS end with: await ea.addElementsToView();
 - setStyle(...) BEFORE creating shapes; it applies to shapes created after it.
 - Coordinates are pixels; lay elements out so they don't overlap.
@@ -112,7 +129,15 @@ utils.suggester(displayItems, items) -> Promise<any>
 - To change existing elements: ea.copyViewElementsToEAforEditing(selected), then mutate them.
 
 ================ EXAMPLES ================
-// 1) Flowchart of 3 boxes + arrows, wrapped in a frame:
+// 1) Flowchart via Mermaid (PREFERRED — auto layout):
+await ea.addMermaid(`flowchart TD
+  A[Mulai] --> B{Valid?}
+  B -->|ya| C[Proses]
+  B -->|tidak| D[Tolak]
+  C --> E[Selesai]`);
+await ea.addElementsToView();
+
+// 2) Flowchart drawn by hand (only if Mermaid can't express it), wrapped in a frame:
 ea.setStyle({ strokeColor: "#1971c2", backgroundColor: "#a5d8ff" });
 const a = ea.addRect(100, 100, 150, 60);
 const b = ea.addRect(100, 240, 150, 60);
@@ -126,7 +151,7 @@ ea.addArrow([[175, 300], [175, 380]]);
 ea.addFrame("Alur Proses", [a, b, c]);
 await ea.addElementsToView();
 
-// 2) Two labelled frames side by side:
+// 3) Two labelled frames side by side:
 ea.setStyle({ strokeColor: "#2f9e44", backgroundColor: "#b2f2bb" });
 const in1 = ea.addEllipse(80, 80, 120, 120);
 ea.addFrame("Input", [in1]);
