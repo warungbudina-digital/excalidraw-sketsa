@@ -1,0 +1,18 @@
+# Keep the build context (and image) small — see the Cloud Shell disk constraints.
+node_modules
+dist
+dist-ssr
+.git
+.gitignore
+.vite
+*.local
+.DS_Store
+npm-debug.log*
+.claude
+.nudge
+*.bak
+*.bak.*
+.env
+.env.*
+!.env.example
+README.md

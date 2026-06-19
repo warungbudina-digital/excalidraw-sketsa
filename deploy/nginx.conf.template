@@ -1,0 +1,55 @@
+# nginx site config for the production app container.
+#
+# This file is a *template*: the nginx:alpine image runs `envsubst` over every
+# /etc/nginx/templates/*.template at startup, so `${OLLAMA_HOST}` below is filled in
+# from the container env. NGINX_ENVSUBST_FILTER=OLLAMA_ (set in the Dockerfile) limits
+# substitution to our own OLLAMA_* vars, so nginx's own $uri/$host/$1 stay intact.
+
+server {
+    listen       80;
+    server_name  _;
+
+    root   /usr/share/nginx/html;
+    index  index.html;
+
+    # Docker's embedded DNS. Using it (plus a variable in proxy_pass below) makes the
+    # ollama upstream resolve at request time, so the ollama container can be recreated
+    # with a new IP without having to restart nginx.
+    resolver 127.0.0.11 ipv6=off valid=10s;
+
+    # Long-cache the content-hashed Vite build assets; never cache the HTML shell.
+    location /assets/ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        try_files $uri =404;
+    }
+
+    # SPA fallback: any unknown path serves index.html so client routing works.
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Reverse proxy to the *private* Ollama container — the production mirror of the
+    # Vite dev proxy in vite.config.ts. The browser calls same-origin /ollama/* so there
+    # is no CORS, and Ollama is never published to the host/internet.
+    #
+    # Origin/Referer are stripped because Ollama (0.x) returns HTTP 403 for browser
+    # requests whose Origin isn't localhost; clearing them makes Ollama treat the proxied
+    # call as a non-browser client (same fix as the dev proxy).
+    location /ollama/ {
+        set $ollama_upstream ${OLLAMA_HOST};
+        rewrite ^/ollama/(.*)$ /$1 break;
+        proxy_pass http://$ollama_upstream;
+
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Origin "";
+        proxy_set_header Referer "";
+
+        # Model generation can be slow on small hardware; don't cut it off, and stream
+        # the response straight through instead of buffering the whole body.
+        proxy_buffering off;
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
+    }
+}

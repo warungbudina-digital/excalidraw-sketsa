@@ -41,6 +41,9 @@ const DEFAULT_STYLE: EAStyle = {
 
 type Skeleton = Record<string, unknown> & { type: string; id: string; groupIds?: string[] };
 
+/** Frame-like element types (Excalidraw frames spec): they must be emitted after their children. */
+const isFrameType = (type: string): boolean => type === "frame" || type === "magicframe";
+
 export class ExcalidrawAutomate {
   public style: EAStyle;
 
@@ -149,6 +152,32 @@ export class ExcalidrawAutomate {
     return groupId;
   }
 
+  /**
+   * Wrap the given children in a frame (an Excalidraw container element).
+   *
+   * `childIds` must be ids returned by `add*` earlier in THIS script run. The frame is
+   * auto-sized to the children's bounding box + 10px padding, each child gets its
+   * `frameId` set to the new frame, and — per the Excalidraw frames spec — the frame is
+   * emitted *after* its children in the elements array (see {@link getElements}) so the
+   * renderer clips it correctly. Returns the frame id.
+   *
+   * Frames cannot be auto-sized without children, so an empty/unknown `childIds` throws.
+   */
+  addFrame(name: string, childIds: string[]): string {
+    const known = new Set(this.skeletons.map((sk) => sk.id));
+    const children = childIds.filter((id) => known.has(id));
+    if (children.length === 0) {
+      throw new Error(
+        "addFrame: childIds must reference shapes created earlier in this script, " +
+          "e.g. const a = ea.addRect(...); ea.addFrame('Grup', [a]);",
+      );
+    }
+    const id = nanoid();
+    // No x/y/width/height: convertToExcalidrawElements auto-fits the frame to its children.
+    this.skeletons.push({ id, type: "frame", name, children });
+    return id;
+  }
+
   // --- workbench: read / edit existing scene elements -----------------------
 
   getViewElements(): readonly SceneElement[] {
@@ -171,7 +200,15 @@ export class ExcalidrawAutomate {
   getElements(): SceneElement[] {
     let converted: SceneElement[] = [];
     if (this.skeletons.length > 0) {
-      converted = convertToExcalidrawElements(this.skeletons as never, {
+      // Frames must come AFTER their children in the elements array (Excalidraw frames
+      // spec) — children are normally created first anyway, but order frames last
+      // regardless of call order so clipping/rendering stays correct. convert reads each
+      // frame's `children` ids, sets `frameId` on those children, and auto-sizes the frame.
+      const ordered = [
+        ...this.skeletons.filter((sk) => !isFrameType(sk.type)),
+        ...this.skeletons.filter((sk) => isFrameType(sk.type)),
+      ];
+      converted = convertToExcalidrawElements(ordered as never, {
         regenerateIds: false,
       }) as unknown as SceneElement[];
       // Re-apply groupIds by id in case the converter drops them.

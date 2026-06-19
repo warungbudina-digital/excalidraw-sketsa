@@ -34,7 +34,9 @@ if (selected.length > 0) {
   const label = ea.addText(140, 150, "Halo dari script!");
   ea.addToGroup([box, label]);
   ea.setStyle({ strokeColor: "#e8590c", backgroundColor: "#ffd8a8" });
-  ea.addEllipse(360, 130, 110, 110);
+  const ball = ea.addEllipse(360, 130, 110, 110);
+  // Bungkus semua dalam satu frame bernama (lihat Excalidraw "frames").
+  ea.addFrame("Contoh", [box, label, ball]);
 }
 
 await ea.addElementsToView();

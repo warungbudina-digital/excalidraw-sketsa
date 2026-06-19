@@ -6,6 +6,11 @@ dist-ssr
 .DS_Store
 npm-debug.log*
 
+# Local env / secrets (Cloudflare tunnel token etc.) — keep .env.example tracked.
+.env
+.env.*
+!.env.example
+
 # Claude Code local/personal files (keep shared .claude/settings.json, skills, commands)
 .claude/settings.local.json
 *.bak

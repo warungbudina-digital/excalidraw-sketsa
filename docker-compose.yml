@@ -1,0 +1,68 @@
+# Excalidraw Sketsa — production stack.
+#
+#   app         the built web app, served by nginx (also reverse-proxies /ollama)
+#   ollama      private LLM backend; auto-builds the custom "excalidraw-ea" model
+#   cloudflared Cloudflare Zero Trust tunnel — publishes the app with no inbound ports
+#
+# Quick start:
+#   cp .env.example .env      # then put your Cloudflare tunnel token in it
+#   docker compose up -d --build
+#
+# Only `app` (optionally) binds a host port; ollama is never exposed, and cloudflared
+# reaches the internet outbound-only. See README "Deploy" for the full walkthrough.
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # Bakes the model name into the bundle; must match the model ollama builds below.
+        VITE_OLLAMA_MODEL: ${VITE_OLLAMA_MODEL:-excalidraw-ea}
+    image: excalidraw-sketsa:latest
+    environment:
+      # Where nginx forwards /ollama -> (compose service name, not localhost).
+      OLLAMA_HOST: ollama:11434
+      TZ: ${TZ:-Asia/Jakarta}
+    ports:
+      # Host:container. For Cloud Shell use Web Preview on 8080. If you only access the app
+      # through the Cloudflare tunnel, you can delete this whole `ports:` block.
+      - "${APP_PORT:-8080}:80"
+    depends_on:
+      - ollama
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    # Start the server, then pull the base model + build excalidraw-ea from /Modelfile.
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    environment:
+      BASE_MODEL: qwen2.5-coder:1.5b
+      CUSTOM_MODEL: ${VITE_OLLAMA_MODEL:-excalidraw-ea}
+      TZ: ${TZ:-Asia/Jakarta}
+    volumes:
+      - ./deploy/ollama-entrypoint.sh:/entrypoint.sh:ro
+      - ./Modelfile:/Modelfile:ro
+      # Persist models in $HOME so they survive Cloud Shell session resets (re-used, not
+      # re-downloaded). Named docker volumes can be wiped when the ephemeral VM recycles.
+      - ${OLLAMA_DATA:-${HOME}/ollama-data}:/root/.ollama
+    # No `ports:` — Ollama stays private; only the app (via nginx) and the host CLI reach it.
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+    restart: unless-stopped
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    # Token-based (Zero Trust dashboard-managed) tunnel. In the dashboard, point the
+    # tunnel's public hostname at the service http://app:80.
+    command: ["tunnel", "--no-autoupdate", "run"]
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?set CLOUDFLARE_TUNNEL_TOKEN in .env}
+      TZ: ${TZ:-Asia/Jakarta}
+    depends_on:
+      - app
+    restart: unless-stopped
