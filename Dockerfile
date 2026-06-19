@@ -33,4 +33,12 @@ ENV NGINX_ENVSUBST_FILTER=OLLAMA_
 COPY --from=build /app/dist /usr/share/nginx/html
 
 EXPOSE 80
+
+# Liveness: nginx is serving the SPA shell. Uses busybox wget (already in nginx:alpine);
+# hits "/" only, so it stays green regardless of the ollama backend's state. Use 127.0.0.1,
+# not "localhost": this image only renders `listen 80;` (IPv4) — the ipv6-listen entrypoint
+# script runs before our template is generated — so "localhost" -> ::1 is refused.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget -q -O /dev/null http://127.0.0.1/ || exit 1
+
 # nginx:alpine already provides the default CMD ["nginx", "-g", "daemon off;"].
