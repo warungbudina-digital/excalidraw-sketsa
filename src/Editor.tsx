@@ -1,17 +1,37 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Excalidraw } from "@excalidraw/excalidraw";
 import "@excalidraw/excalidraw/index.css";
-import { serializeScene } from "./io/serialize";
+import { curateAppState, serializeScene } from "./io/serialize";
 import { parseScene } from "./io/parse";
 import { ExcalidrawAutomate } from "./automate/ExcalidrawAutomate";
 import { createDefaultUtils, runScript } from "./automate/scriptRunner";
 import { generateScript, OLLAMA_MODEL } from "./ai/ollama";
 import { COMPANY_NAME } from "./auth/auth";
-import type { ExcalidrawApi } from "./types";
+import { generateSceneCode } from "./scene-code/artifact";
+import {
+  CollaborationClient,
+  createRoomId,
+  getRoomFromUrl,
+  setRoomInUrl,
+  type Collaborator,
+  type CollaborationStatus,
+} from "./collab/client";
+import type { ExcalidrawApi, SerializableScene } from "./types";
 import "./App.css";
 
 const STORAGE_KEY = "excalidraw-sketsa:scene";
-const AUTOSAVE_MS = 800;
+const AUTOSAVE_MS = 2000;
+
+interface AutosaveResponse {
+  id: number;
+  data?: string;
+  error?: string;
+}
+
+type IdleWindow = Window & {
+  requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
+  cancelIdleCallback?: (id: number) => void;
+};
 
 const SAMPLE_SCRIPT = `// EA script — 'ea' dan 'utils' sudah tersedia.
 // Select beberapa text element lalu jalankan untuk menambah "bullet" + grup.
@@ -45,6 +65,12 @@ await ea.addElementsToView();
 export default function Editor({ onLogout }: { onLogout: () => void }) {
   const apiRef = useRef<ExcalidrawApi | null>(null);
   const autosaveTimer = useRef<number | null>(null);
+  const autosaveIdleTask = useRef<number | null>(null);
+  const autosaveWorker = useRef<Worker | null>(null);
+  const autosaveVersion = useRef(0);
+  const collaborationClient = useRef<CollaborationClient | null>(null);
+  const suppressCollaborationUntil = useRef(0);
+  const clientId = useRef(crypto.randomUUID().replace(/-/g, ""));
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [status, setStatus] = useState("");
@@ -52,23 +78,99 @@ export default function Editor({ onLogout }: { onLogout: () => void }) {
   const [scriptCode, setScriptCode] = useState(SAMPLE_SCRIPT);
   const [aiPrompt, setAiPrompt] = useState("");
   const [aiBusy, setAiBusy] = useState(false);
+  const [sceneCodeBusy, setSceneCodeBusy] = useState(false);
+  const [apiReady, setApiReady] = useState(false);
+  const [collaborationRoom, setCollaborationRoom] = useState(getRoomFromUrl);
+  const [collaborationStatus, setCollaborationStatus] =
+    useState<CollaborationStatus>("offline");
+  const [collaborators, setCollaborators] = useState<Collaborator[]>([]);
 
   const flash = useCallback((message: string) => {
     setStatus(message);
     window.setTimeout(() => setStatus(""), 3000);
   }, []);
 
-  const serializeCurrent = useCallback((): string | null => {
+  useEffect(() => {
+    const worker = new Worker(new URL("./workers/autosave.worker.ts", import.meta.url), {
+      type: "module",
+      name: "scene-autosave",
+    });
+    autosaveWorker.current = worker;
+
+    worker.onmessage = (event: MessageEvent<AutosaveResponse>) => {
+      const { id, data, error } = event.data;
+      if (id !== autosaveVersion.current) {
+        return;
+      }
+      if (error || data === undefined) {
+        console.error("Autosave serialization failed:", error ?? "empty worker response");
+        return;
+      }
+
+      const idleWindow = window as IdleWindow;
+      const write = () => {
+        autosaveIdleTask.current = null;
+        if (id !== autosaveVersion.current) {
+          return;
+        }
+        try {
+          localStorage.setItem(STORAGE_KEY, data);
+        } catch (writeError) {
+          console.error("Autosave localStorage write failed:", writeError);
+        }
+      };
+
+      autosaveIdleTask.current = idleWindow.requestIdleCallback
+        ? idleWindow.requestIdleCallback(write, { timeout: 1000 })
+        : window.setTimeout(write, 0);
+    };
+
+    return () => {
+      if (autosaveTimer.current !== null) {
+        window.clearTimeout(autosaveTimer.current);
+      }
+      if (autosaveIdleTask.current !== null) {
+        const idleWindow = window as IdleWindow;
+        if (idleWindow.cancelIdleCallback) {
+          idleWindow.cancelIdleCallback(autosaveIdleTask.current);
+        } else {
+          window.clearTimeout(autosaveIdleTask.current);
+        }
+      }
+      worker.terminate();
+      autosaveWorker.current = null;
+    };
+  }, []);
+
+  const currentScene = useCallback((includeDeleted = false): SerializableScene | null => {
     const api = apiRef.current;
     if (!api) {
       return null;
     }
-    return serializeScene({
-      elements: api.getSceneElements(),
-      appState: api.getAppState(),
+    return {
+      elements:
+        includeDeleted && api.getSceneElementsIncludingDeleted
+          ? api.getSceneElementsIncludingDeleted()
+          : api.getSceneElements(),
+      appState: curateAppState(api.getAppState()),
       files: api.getFiles(),
-    });
+    };
   }, []);
+
+  const currentCollaborationScene = useCallback((): SerializableScene | null => {
+    const scene = currentScene(true);
+    if (!scene) return null;
+    return {
+      ...scene,
+      // Viewport, zoom, selection, and current tool remain local to each collaborator.
+      appState: { viewBackgroundColor: scene.appState.viewBackgroundColor },
+    };
+  }, [currentScene]);
+
+  const serializeCurrent = useCallback((): string | null => {
+    const scene = currentScene();
+    return scene ? serializeScene(scene) : null;
+  }, [currentScene]);
 
   const save = useCallback(() => {
     const data = serializeCurrent();
@@ -112,21 +214,95 @@ export default function Editor({ onLogout }: { onLogout: () => void }) {
       if (stored) {
         loadFromString(stored, "Dipulihkan");
       }
+      setApiReady(true);
     },
     [loadFromString],
   );
 
+  useEffect(() => {
+    if (!collaborationRoom || !apiReady) return;
+    const nameKey = "excalidraw-sketsa:collab-name";
+    const savedName = localStorage.getItem(nameKey);
+    const name = savedName || `Pengguna-${clientId.current.slice(0, 4)}`;
+    if (!savedName) localStorage.setItem(nameKey, name);
+
+    const client = new CollaborationClient(collaborationRoom, clientId.current, name, {
+      onStatus: setCollaborationStatus,
+      onPresence: setCollaborators,
+      onEmptyRoom: () => {
+        const scene = currentCollaborationScene();
+        if (scene) client.publish(scene, true);
+      },
+      onScene: (scene) => {
+        const api = apiRef.current;
+        if (!api) return;
+        suppressCollaborationUntil.current = performance.now() + 500;
+        const files = Object.entries(scene.files).map(([id, file]) => ({
+          id,
+          ...(file as object),
+        }));
+        if (files.length > 0) api.addFiles?.(files);
+        api.updateScene({ elements: scene.elements, appState: scene.appState });
+      },
+      onError: (message) => flash(message),
+    });
+    collaborationClient.current = client;
+    client.connect();
+
+    return () => {
+      client.stop();
+      if (collaborationClient.current === client) collaborationClient.current = null;
+    };
+  }, [apiReady, collaborationRoom, currentCollaborationScene, flash]);
+
   const handleChange = useCallback(() => {
+    const id = autosaveVersion.current + 1;
+    autosaveVersion.current = id;
     if (autosaveTimer.current !== null) {
       window.clearTimeout(autosaveTimer.current);
     }
     autosaveTimer.current = window.setTimeout(() => {
-      const data = serializeCurrent();
-      if (data !== null) {
-        localStorage.setItem(STORAGE_KEY, data);
+      autosaveTimer.current = null;
+      const scene = currentScene();
+      if (scene && autosaveWorker.current) {
+        autosaveWorker.current.postMessage({ id, scene });
       }
     }, AUTOSAVE_MS);
-  }, [serializeCurrent]);
+
+    if (performance.now() >= suppressCollaborationUntil.current) {
+      const scene = currentCollaborationScene();
+      if (scene) collaborationClient.current?.publish(scene);
+    }
+  }, [currentCollaborationScene, currentScene]);
+
+  const startCollaboration = useCallback(() => {
+    const nameKey = "excalidraw-sketsa:collab-name";
+    const currentName = localStorage.getItem(nameKey) || `Pengguna-${clientId.current.slice(0, 4)}`;
+    const name = window.prompt("Nama yang terlihat oleh kolaborator:", currentName)?.trim();
+    if (!name) return;
+    localStorage.setItem(nameKey, name.slice(0, 48));
+    const room = createRoomId();
+    setRoomInUrl(room);
+    setCollaborationRoom(room);
+  }, []);
+
+  const leaveCollaboration = useCallback(() => {
+    collaborationClient.current?.stop();
+    setRoomInUrl("");
+    setCollaborationRoom("");
+    setCollaborationStatus("offline");
+    setCollaborators([]);
+    flash("Kolaborasi dihentikan");
+  }, [flash]);
+
+  const copyCollaborationLink = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      flash("Link kolaborasi disalin");
+    } catch {
+      window.prompt("Salin link kolaborasi ini:", window.location.href);
+    }
+  }, [flash]);
 
   const exportFile = useCallback(() => {
     const data = serializeCurrent();
@@ -190,6 +366,23 @@ export default function Editor({ onLogout }: { onLogout: () => void }) {
     }
   }, [aiPrompt, aiBusy, flash]);
 
+  const generateCurrentSceneCode = useCallback(async () => {
+    if (sceneCodeBusy) return;
+    const scene = currentScene(true);
+    if (!scene) return;
+    setSceneCodeBusy(true);
+    try {
+      const code = await generateSceneCode(scene, { compact: true, mode: "replace" });
+      setScriptCode(code);
+      setShowScript(true);
+      flash("Scene as Code dibuat — tinjau lalu ► Jalankan");
+    } catch (error) {
+      flash(`Scene as Code gagal — ${(error as Error).message}`);
+    } finally {
+      setSceneCodeBusy(false);
+    }
+  }, [currentScene, flash, sceneCodeBusy]);
+
   return (
     <div className="app">
       <header className="toolbar">
@@ -212,6 +405,16 @@ export default function Editor({ onLogout }: { onLogout: () => void }) {
         <button onClick={() => setShowScript((v) => !v)}>
           {showScript ? "Tutup Script" : "Script"}
         </button>
+        {collaborationRoom ? (
+          <span className="collaboration-controls" title={collaborators.map((user) => user.name).join(", ")}>
+            <span className={`collaboration-state ${collaborationStatus}`} aria-hidden />
+            <span>{collaborators.length} online</span>
+            <button onClick={() => void copyCollaborationLink()}>Salin Link</button>
+            <button className="collaboration-leave" onClick={leaveCollaboration}>Keluar Room</button>
+          </span>
+        ) : (
+          <button className="collaboration-start" onClick={startCollaboration}>Kolaborasi</button>
+        )}
         <span className="status">{status}</span>
         <button className="logout" onClick={onLogout}>
           Keluar
@@ -236,7 +439,16 @@ export default function Editor({ onLogout }: { onLogout: () => void }) {
         <div className="script-panel">
           <div className="script-panel-head">
             <strong>Script (Excalidraw Automate)</strong>
-            <button onClick={doRunScript}>► Jalankan</button>
+            <span className="script-panel-actions">
+              <button
+                className="scene-code-btn"
+                onClick={() => void generateCurrentSceneCode()}
+                disabled={sceneCodeBusy}
+              >
+                {sceneCodeBusy ? "Membuat…" : "Scene → Code"}
+              </button>
+              <button onClick={doRunScript}>► Jalankan</button>
+            </span>
           </div>
           <div className="ai-row">
             <input

@@ -127,18 +127,19 @@ docker compose up -d app
 docker compose up -d cloudflared
 ```
 
-### AI backend: local Ollama ↔ cloud codex-mini
+### AI backend: local Ollama ↔ cloud gpt-5.4-mini
 
 The AI backend is pluggable; the app is unchanged either way (it always calls same-origin
 `/ollama/*`, and `ai-proxy` speaks the same Ollama dialect). Choose with two `.env` vars:
 
 ```bash
-# Local: private on-VPS Ollama (default)
+# Local: optional private on-VPS Ollama
 COMPOSE_PROFILES=local   AI_UPSTREAM=ollama:11434
 
-# Cloud: OpenAI codex-mini via ai-proxy (light VPS, strong instruction-following)
+# Cloud (default): OpenAI gpt-5.4-mini via ai-proxy
 COMPOSE_PROFILES=cloud   AI_UPSTREAM=ai-proxy:8080
 OPENAI_API_KEY=sk-...                 # server-side only; never in the browser bundle
+OPENAI_MODEL=gpt-5.4-mini
 ```
 
 After editing `.env`: `docker compose up -d --build` then `docker compose up -d --build app`
@@ -160,24 +161,37 @@ docker compose exec ollama ollama list          # excalidraw-ea and qwen2.5-code
 # (b) App serves the SPA:
 curl -sf -o /dev/null -w "app: %{http_code}\n" http://localhost:8080/
 
-# (c) /ollama proxy works through the app, WITH a browser Origin (the 403 regression test):
+# (c) Collaboration service and nginx route are healthy:
+curl -sf http://localhost:8080/collab/healthz
+
+# (d) /ollama proxy works through the app, WITH a browser Origin (the 403 regression test):
 curl -s -o /dev/null -w "tags via proxy: %{http_code}\n" \
   -H "Origin: https://example.cloudshell.dev" http://localhost:8080/ollama/api/tags
 # Expect 200 (would be 403 if nginx didn't strip Origin).
 
-# (d) End-to-end generate through the proxy:
+# (e) End-to-end generate through the proxy:
 curl -s http://localhost:8080/ollama/api/chat \
   -H "Content-Type: application/json" \
   -d '{"model":"excalidraw-ea","stream":false,
        "messages":[{"role":"user","content":"kotak berisi teks Halo dalam sebuah frame"}]}' \
   | head -c 400; echo
 
-# (e) Tunnel registered connections to Cloudflare:
+# (f) Tunnel registered connections to Cloudflare:
 docker compose logs cloudflared | grep -iE "Registered tunnel connection|Connection .* registered"
 ```
 
 Then open your Cloudflare hostname in a browser, log in (demo `admin` / `mesari123`), open
 **Script → ✨ Generate**, and confirm the AI produces an EA script (including `ea.addFrame`).
+
+Scene as Code regression check:
+
+1. Draw shapes, bindings, a frame, and an image.
+2. Open **Script → Scene → Code** and copy the generated script.
+3. Clear or alter the canvas, then run the script; the original visible scene must return.
+4. Change `mode` to `insert`, set `offsetX`/`offsetY`, and run twice; both copies must appear
+   without id collisions.
+5. Run `npm run test:scene-code` after changing artifact, remapping, or load behavior. The
+   Docker production build runs this test automatically before Vite builds.
 
 On Cloud Shell without the tunnel, use **Web Preview → port 8080**.
 
@@ -200,6 +214,7 @@ image: `docker compose up -d --build app` (the name is baked into the bundle at 
 ```bash
 docker compose ps                 # status
 docker compose logs -f app        # nginx access/error logs
+docker compose logs -f collab     # room connections and server errors
 docker compose logs -f ollama     # model pull/build + inference logs
 docker compose logs -f cloudflared
 

@@ -34,6 +34,8 @@ ea.addToGroup(ids) -> groupId
 ea.addFrame(name, childIds) -> frameId   // wraps childIds in a named frame, auto-sized
 await ea.addMermaid(definition) -> ids[]  // render a Mermaid diagram (auto layout). PREFER
                                           // this for any flowchart/diagram.
+await ea.loadSceneCode(payload, { mode:"replace"|"insert", offsetX?, offsetY?, verifyChecksum? })
+  // load a payload produced by the app's "Scene → Code" button; NEVER invent this payload
 ea.getViewElements() -> elements[]
 ea.getViewSelectedElements() -> elements[]   // elements have id, type, x, y, width, height, strokeColor, fontSize, text
 ea.copyViewElementsToEAforEditing(elements)  // required before mutating existing scene elements

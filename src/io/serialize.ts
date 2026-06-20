@@ -39,7 +39,7 @@ const CURATED_APPSTATE_KEYS = [
   "currentItemRoundness",
 ] as const;
 
-function curateAppState(appState: Record<string, unknown>): Record<string, unknown> {
+export function curateAppState(appState: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const key of CURATED_APPSTATE_KEYS) {
     if (appState[key] !== undefined) {

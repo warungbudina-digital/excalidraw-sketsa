@@ -2,8 +2,8 @@
 #
 # This file is a *template*: the nginx:alpine image runs `envsubst` over every
 # /etc/nginx/templates/*.template at startup, so `${OLLAMA_HOST}` below is filled in
-# from the container env. NGINX_ENVSUBST_FILTER=OLLAMA_ (set in the Dockerfile) limits
-# substitution to our own OLLAMA_* vars, so nginx's own $uri/$host/$1 stay intact.
+# from the container env. NGINX_ENVSUBST_FILTER (set in the Dockerfile) limits substitution
+# to our OLLAMA_* and COLLAB_* vars, so nginx's own $uri/$host/$1 stay intact.
 
 server {
     listen       80;
@@ -27,6 +27,24 @@ server {
     # SPA fallback: any unknown path serves index.html so client routing works.
     location / {
         try_files $uri $uri/ /index.html;
+    }
+
+    # Live collaboration: SSE events + scene update POSTs. Buffering must stay disabled or
+    # presence/scene events would be delayed until nginx accumulates a response buffer.
+    location /collab/ {
+        set $collab_upstream ${COLLAB_HOST};
+        rewrite ^/collab/(.*)$ /$1 break;
+        proxy_pass http://$collab_upstream;
+
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 1h;
+        proxy_send_timeout 60s;
+        client_max_body_size 15m;
     }
 
     # Reverse proxy to the *private* Ollama container — the production mirror of the

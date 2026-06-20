@@ -39,6 +39,54 @@
   min-height: 16px;
 }
 
+.collaboration-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 6px;
+  font-size: 12px;
+  color: #495057;
+  white-space: nowrap;
+}
+
+.collaboration-state {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #adb5bd;
+}
+
+.collaboration-state.connected {
+  background: #2f9e44;
+  box-shadow: 0 0 0 3px #d3f9d8;
+}
+
+.collaboration-state.connecting,
+.collaboration-state.reconnecting {
+  background: #f08c00;
+  box-shadow: 0 0 0 3px #fff3bf;
+}
+
+.toolbar .collaboration-start {
+  border-color: #b2f2bb;
+  color: #2b8a3e;
+}
+
+.toolbar .collaboration-controls .collaboration-leave {
+  border-color: #ffc9c9;
+  color: #c92a2a;
+}
+
+@media (max-width: 900px) {
+  .toolbar {
+    overflow-x: auto;
+  }
+
+  .toolbar .brand {
+    display: none;
+  }
+}
+
 .toolbar .logout {
   border-color: #ffc9c9;
   color: #e03131;
@@ -79,6 +127,21 @@
   background: #2f9e44;
   color: #fff;
   cursor: pointer;
+}
+
+.script-panel-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.script-panel-head .scene-code-btn {
+  background: #1971c2;
+}
+
+.script-panel-head button:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 .ai-row {

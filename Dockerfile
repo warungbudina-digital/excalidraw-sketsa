@@ -14,7 +14,7 @@ ARG VITE_OLLAMA_MODEL=excalidraw-ea
 ENV VITE_OLLAMA_MODEL=${VITE_OLLAMA_MODEL}
 
 COPY . .
-RUN npm run build
+RUN npm run test:scene-code && npm run build
 
 # ---- Stage 2: serve the static build with a tiny nginx ---------------------------------
 # Final image carries no node_modules / node runtime — just nginx + the built assets.
@@ -28,7 +28,8 @@ COPY deploy/nginx.conf.template /etc/nginx/templates/default.conf.template
 # The app container reaches Ollama over the compose network (service name "ollama"),
 # never over the host's localhost. Override at run time if your Ollama lives elsewhere.
 ENV OLLAMA_HOST=ollama:11434
-ENV NGINX_ENVSUBST_FILTER=OLLAMA_
+ENV COLLAB_HOST=collab:8081
+ENV NGINX_ENVSUBST_FILTER="OLLAMA_|COLLAB_"
 
 COPY --from=build /app/dist /usr/share/nginx/html
 

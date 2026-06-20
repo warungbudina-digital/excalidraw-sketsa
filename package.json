@@ -8,7 +8,8 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:scene-code": "esbuild tests/scene-code.test.ts --bundle --platform=node --format=esm --outfile=/tmp/scene-code.test.mjs && node /tmp/scene-code.test.mjs"
   },
   "dependencies": {
     "@excalidraw/excalidraw": "0.18.1",

@@ -1,5 +1,5 @@
 // ai-proxy — a tiny, dependency-free Ollama-compatible shim that forwards to the OpenAI
-// Responses API (default model: gpt-5-mini).
+// Responses API (default model: gpt-5.4-mini).
 //
 // Why: the browser app talks "Ollama dialect" (POST /api/chat, GET /api/tags) through the
 // same-origin nginx proxy. This service speaks that same dialect on the OUTSIDE, but on the
@@ -7,21 +7,20 @@
 // following) with ZERO changes to the app or nginx. Pick this backend by pointing the app's
 // upstream at `ai-proxy:8080` (AI_UPSTREAM in .env). The API key stays here, server-side.
 //
-// Env: OPENAI_API_KEY (required), OPENAI_MODEL (default gpt-5-mini),
+// Env: OPENAI_API_KEY (required), OPENAI_MODEL (default gpt-5.4-mini),
 //      OPENAI_BASE_URL (default https://api.openai.com/v1/responses),
-//      OPENAI_REASONING_EFFORT (default low; gpt-5-mini also accepts "minimal" for faster/cheaper),
+//      OPENAI_REASONING_EFFORT (default low),
 //      OPENAI_MAX_OUTPUT_TOKENS (default 1024), PORT (default 8080).
 //
 // Model choice mirrors the Ollama Modelfile: qwen2.5-coder:1.5b (small, cheap, code-strong,
-// deterministic) -> gpt-5-mini. Both are REASONING models, so temperature/top_p are dropped
-// and reasoning.effort is sent. Scale up like the Modelfile's qwen2.5-coder:7b note via
-// OPENAI_MODEL=gpt-5.
+// deterministic) -> gpt-5.4-mini. Both are reasoning models, so temperature/top_p are
+// dropped and reasoning.effort is sent.
 
 import http from "node:http";
 
 const PORT = Number(process.env.PORT || 8080);
 const API_KEY = process.env.OPENAI_API_KEY || "";
-const MODEL = process.env.OPENAI_MODEL || "gpt-5-mini";
+const MODEL = process.env.OPENAI_MODEL || "gpt-5.4-mini";
 const BASE_URL = process.env.OPENAI_BASE_URL || "https://api.openai.com/v1/responses";
 const EFFORT = process.env.OPENAI_REASONING_EFFORT || "low";
 const MAX_OUT = Number(process.env.OPENAI_MAX_OUTPUT_TOKENS || 1024);
@@ -87,9 +86,8 @@ async function handleChat(req, res) {
         ...(instructions ? { instructions } : {}),
         input,
         max_output_tokens: MAX_OUT,
-        // gpt-5-mini (and codex-mini-latest) are REASONING models: temperature/top_p are NOT
-        // supported and 400 if sent, so we drop Ollama's options.temperature and only set
-        // reasoning.effort + max_output_tokens.
+        // Reasoning models do not accept temperature/top_p here and return 400 if they are
+        // sent, so drop Ollama's options.temperature and only set effort + output limits.
         reasoning: { effort: EFFORT },
       }),
     });

@@ -22,6 +22,14 @@ const ollamaProxy: Record<string, ProxyOptions> = {
   },
 };
 
+const collaborationProxy: Record<string, ProxyOptions> = {
+  "/collab": {
+    target: "http://localhost:8081",
+    changeOrigin: true,
+    rewrite: (path) => path.replace(/^\/collab/, ""),
+  },
+};
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
@@ -33,11 +41,11 @@ export default defineConfig({
     // Port 8080 + host:true so Google Cloud Shell "Web Preview" works out of the box.
     host: true,
     port: 8080,
-    proxy: ollamaProxy,
+    proxy: { ...ollamaProxy, ...collaborationProxy },
   },
   preview: {
     host: true,
     port: 8080,
-    proxy: ollamaProxy,
+    proxy: { ...ollamaProxy, ...collaborationProxy },
   },
 });

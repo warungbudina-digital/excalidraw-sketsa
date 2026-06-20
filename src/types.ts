@@ -50,5 +50,6 @@ export interface ExcalidrawApi {
     captureUpdate?: unknown;
   }) => void;
   addFiles?: (files: unknown[]) => void;
+  resetScene?: () => void;
   scrollToContent?: (target?: unknown, opts?: unknown) => void;
 }
