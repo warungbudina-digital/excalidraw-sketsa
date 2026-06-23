@@ -10,7 +10,11 @@ silently also included `.claude/settings.json` + `.nudge/rules.yaml` (e.g. commi
 
 ## Fix
 Commit with an explicit pathspec so ONLY those paths are committed regardless of what else the
-hook staged: `git commit -- <path1> <path2> ...` (or `git commit <paths>`). Before committing,
+hook staged: `git commit -- <path1> <path2> ...` (or `git commit <paths>`). FLAG ORDER MATTERS:
+`-m "msg"` must come BEFORE `--`, because `--` ends option parsing and everything after it is a
+pathspec. So write `git commit -m "msg" -- <paths>` — NOT `git commit -- <paths> -m "msg"`
+(the latter aborts: `error: pathspec '-m' did not match any file(s)`, HEAD untouched, no harm
+done — just rerun with the right order). Before committing,
 inspect the index with `git diff --cached --name-only` (or `git status --short`) and `git
 restore --staged <unwanted>` to drop hook-staged files. To undo an already-made local commit
 that swept extras in (not pushed): `git reset --soft HEAD~1` then re-stage precisely, or
