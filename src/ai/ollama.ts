@@ -34,8 +34,11 @@ ea.addToGroup(ids) -> groupId
 ea.addFrame(name, childIds) -> frameId   // wraps childIds in a named frame, auto-sized
 await ea.addMermaid(definition) -> ids[]  // render a Mermaid diagram (auto layout). PREFER
                                           // this for any flowchart/diagram.
+ea.addRawElements(elements, files?) -> ids[]  // insert raw Excalidraw elements verbatim. "Scene →
+  // Code" emits this for shapes it can't rebuild (image/freedraw). KEEP such blocks intact when editing.
+await ea.clearView()  // wipe the canvas. "Scene → Code" puts this first so re-running REPLACES the scene
 await ea.loadSceneCode(payload, { mode:"replace"|"insert", offsetX?, offsetY?, verifyChecksum? })
-  // load a payload produced by the app's "Scene → Code" button; NEVER invent this payload
+  // load an opaque payload (advanced); NEVER invent this payload
 ea.getViewElements() -> elements[]
 ea.getViewSelectedElements() -> elements[]   // elements have id, type, x, y, width, height, strokeColor, fontSize, text
 ea.copyViewElementsToEAforEditing(elements)  // required before mutating existing scene elements
@@ -71,6 +74,10 @@ Rules:
   NOT a separate addText; the label is centered and moves with the box.
 - Connect shapes with ea.connect(a, b) — NOT ea.addArrow with manual points; the arrow binds to
   both shapes and stays attached. Use addArrow(points) only for free-floating lines.
+- EDITING: when the user message contains a "SCRIPT EA SAAT INI" block, MODIFY that script to
+  satisfy the request and return the COMPLETE updated script (keep its structure, and keep any
+  ea.clearView()/ea.addRawElements(...) lines unless asked otherwise). Add the user's idea —
+  goresan/garis baru, pewarnaan via ea.setStyle, atau menggabungkan dua gambar — into it.
 - ALWAYS finish with: await ea.addElementsToView();
 - Call ea.setStyle(...) before creating shapes to set colors.
 - Coordinates are pixels; lay elements out so they don't overlap.
@@ -105,6 +112,13 @@ function stripCodeFences(text: string): string {
 
 export interface GenerateOptions {
   signal?: AbortSignal;
+  /**
+   * The script currently in the editor (e.g. a Scene → Code decompilation). When present, the
+   * model is asked to EDIT/extend it rather than start from scratch. It is sent inside the USER
+   * message — NOT a system message — because a request `system` message REPLACES the custom
+   * model's baked-in Modelfile SYSTEM (see .nudge/learned/testing-excalidraw-ea-...).
+   */
+  currentScript?: string;
 }
 
 /** Generate an EA script from a natural-language prompt. Throws on transport/model error. */
@@ -112,6 +126,11 @@ export async function generateScript(
   prompt: string,
   opts: GenerateOptions = {},
 ): Promise<string> {
+  const context = opts.currentScript?.trim();
+  const userContent = context
+    ? `${prompt}\n\n--- SCRIPT EA SAAT INI (ubah sesuai permintaan di atas, lalu kembalikan SELURUH script lengkap yang bisa dijalankan) ---\n${context}`
+    : prompt;
+
   let res: Response;
   try {
     res = await fetch(ENDPOINT, {
@@ -121,7 +140,7 @@ export async function generateScript(
         model: OLLAMA_MODEL,
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
-          { role: "user", content: prompt },
+          { role: "user", content: userContent },
         ],
         stream: false,
         options: { temperature: 0.2 },

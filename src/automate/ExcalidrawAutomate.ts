@@ -311,6 +311,22 @@ export class ExcalidrawAutomate {
     return converted.map((el) => el.id);
   }
 
+  /**
+   * Push already-formed Excalidraw elements straight into the workbench, bypassing the
+   * skeleton converter — the same path {@link addMermaid} uses for its image output. This is
+   * the escape hatch the Scene→Code decompiler emits for element types EA has no builder for
+   * (image, freedraw, embeddable, …): a decompiled script stays runnable AND lossless for
+   * them. Optionally registers their binary files. Returns the element ids.
+   */
+  addRawElements(elements: readonly SceneElement[], files?: SceneFiles): string[] {
+    const cloned = (elements ?? []).map((el) => JSON.parse(JSON.stringify(el)) as SceneElement);
+    this.prebuilt.push(...cloned);
+    if (files) {
+      Object.assign(this.pendingFiles, files);
+    }
+    return cloned.map((el) => el.id);
+  }
+
   // --- workbench: read / edit existing scene elements -----------------------
 
   getViewElements(): readonly SceneElement[] {
@@ -377,6 +393,16 @@ export class ExcalidrawAutomate {
   async loadSceneCode(payload: string, options: SceneLoadOptions = {}): Promise<boolean> {
     const artifact = await decodeSceneArtifact(payload, options.verifyChecksum ?? true);
     return this.loadScene(artifact.scene, options);
+  }
+
+  /**
+   * Wipe the live canvas (publishing tombstones so a collaboration room does not merge the
+   * old scene back in), leaving an empty scene. The Scene→Code decompiler emits this at the
+   * top of a rebuild script so re-running it REPLACES the canvas instead of stacking a second
+   * copy on top (decompiled shapes get fresh ids, which would otherwise append on merge).
+   */
+  async clearView(): Promise<void> {
+    await loadSceneIntoApi(this.api, { elements: [], appState: {}, files: {} }, { mode: "replace" });
   }
 
   // --- commit ---------------------------------------------------------------

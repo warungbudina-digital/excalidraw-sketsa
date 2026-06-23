@@ -7,7 +7,7 @@ import { ExcalidrawAutomate } from "./automate/ExcalidrawAutomate";
 import { createDefaultUtils, runScript } from "./automate/scriptRunner";
 import { generateScript, OLLAMA_MODEL } from "./ai/ollama";
 import { COMPANY_NAME } from "./auth/auth";
-import { generateSceneCode } from "./scene-code/artifact";
+import { sceneToEAScript } from "./scene-code/decompile";
 import {
   CollaborationClient,
   createRoomId,
@@ -424,7 +424,9 @@ export default function Editor({ onLogout }: { onLogout: () => void }) {
     setAiBusy(true);
     flash(`Menghubungi ${OLLAMA_MODEL}…`);
     try {
-      const code = await generateScript(prompt);
+      // Pass the current editor script as context so the AI can EDIT/extend an existing scene
+      // (e.g. a Scene → Code decompilation), not just generate from scratch.
+      const code = await generateScript(prompt, { currentScript: scriptCode });
       setScriptCode(code);
       flash("Script dibuat AI — tinjau lalu ► Jalankan");
     } catch (e) {
@@ -432,20 +434,22 @@ export default function Editor({ onLogout }: { onLogout: () => void }) {
     } finally {
       setAiBusy(false);
     }
-  }, [aiPrompt, aiBusy, flash]);
+  }, [aiPrompt, aiBusy, scriptCode, flash]);
 
-  const generateCurrentSceneCode = useCallback(async () => {
+  const generateCurrentSceneCode = useCallback(() => {
     if (sceneCodeBusy) return;
-    const scene = currentScene(true);
+    const scene = currentScene();
     if (!scene) return;
     setSceneCodeBusy(true);
     try {
-      const code = await generateSceneCode(scene, { compact: true, mode: "replace" });
+      // Decompile the live scene to a READABLE EA script (not an opaque payload), so the user
+      // — or the AI via ✨ Generate — can edit it, then ► Jalankan to render the result.
+      const code = sceneToEAScript(scene);
       setScriptCode(code);
       setShowScript(true);
-      flash("Scene as Code dibuat — tinjau lalu ► Jalankan");
+      flash("Scene → EA script dibuat — edit / minta AI, lalu ► Jalankan");
     } catch (error) {
-      flash(`Scene as Code gagal — ${(error as Error).message}`);
+      flash(`Scene → Code gagal — ${(error as Error).message}`);
     } finally {
       setSceneCodeBusy(false);
     }
