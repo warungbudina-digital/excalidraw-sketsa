@@ -189,3 +189,149 @@ rules:
         prompt:
           - kind: Regex
             pattern: "(?i)(deploy|deploy ke|production|produksi|go.?live|rilis|cloud run|gke|app engine)"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # JEBAKAN SPESIFIK REPO INI (excalidraw-sketsa)
+  # Diturunkan dari catatan insiden di .nudge/learned/. Rule = penjaga
+  # deterministik saat menulis; baca file learned untuk detail lengkap.
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  # In-container probe harus IPv4 — image hanya render `listen 80;` (IPv4).
+  # `http://localhost/` -> ::1 ditolak. Lihat:
+  # .nudge/learned/app-nginx-healthcheck-must-hit-127-0-0-1-not-localhost-image-renders-ipv4-only.md
+  - name: dockerfile-probe-use-ipv4-not-localhost
+    description: HEALTHCHECK/probe di dalam container app harus 127.0.0.1, bukan localhost
+    message: "Probe di dalam container app (HEALTHCHECK `wget`/`curl`) harus pakai `http://127.0.0.1/`, BUKAN `http://localhost/`. Image nginx ini cuma render `listen 80;` (IPv4-only) karena script ipv6-listen jalan SEBELUM template di-generate, jadi `localhost` -> `::1` ditolak (Connection refused). Ganti ke 127.0.0.1 lalu coba lagi."
+    on:
+      - hook: PreToolUse
+        tool: Write
+        file: "**/Dockerfile*"
+        content:
+          - kind: Regex
+            pattern: "(?im)\\b(wget|curl)\\b[^\\n]*http://localhost\\b"
+      - hook: PreToolUse
+        tool: Edit
+        file: "**/Dockerfile*"
+        new_content:
+          - kind: Regex
+            pattern: "(?im)\\b(wget|curl)\\b[^\\n]*http://localhost\\b"
+
+  # `${OPENAI_API_KEY:?}` membuat SEMUA perintah compose gagal — bahkan saat
+  # menjalankan profile `local` — karena interpolasi jalan atas SELURUH file
+  # sebelum filter profile. Lihat:
+  # .nudge/learned/compose-var-breaks-every-command-even-for-the-other-profile.md
+  - name: compose-no-hard-required-profile-secret
+    description: Jangan pakai ${OPENAI_API_KEY:?} di compose — pakai soft default
+    message: "Jangan guard `OPENAI_API_KEY` dengan `${OPENAI_API_KEY:?...}`. Interpolasi compose jalan atas SELURUH file SEBELUM filter profile, jadi `:?` pada service profile `cloud` bikin SETIAP `docker compose` gagal — termasuk saat profile `local` aktif. Pakai soft default `${OPENAI_API_KEY:-}` dan validasi saat runtime di dalam service (ai-proxy log `key MISSING` + 500). Sisakan `:?` hanya untuk var yang selalu wajib (mis. CLOUDFLARE_TUNNEL_TOKEN). Perbaiki lalu coba lagi."
+    on:
+      - hook: PreToolUse
+        tool: Write
+        file: "**/*compose*.y*ml"
+        content:
+          - kind: Regex
+            pattern: "\\$\\{OPENAI_API_KEY:\\?"
+      - hook: PreToolUse
+        tool: Edit
+        file: "**/*compose*.y*ml"
+        new_content:
+          - kind: Regex
+            pattern: "\\$\\{OPENAI_API_KEY:\\?"
+
+  # Kode browser TIDAK boleh memanggil Ollama langsung di :11434 (CORS + 403
+  # Origin + tak terjangkau di Cloud Shell). Harus lewat same-origin /ollama.
+  # Lihat: .nudge/learned/browser-ollama-use-the-vite-ollama-proxy-not-a-direct-call.md
+  - name: browser-no-direct-ollama-port
+    description: Browser code harus lewat proxy /ollama, bukan langsung :11434
+    message: "Kode di `src/` jangan memanggil Ollama langsung di `:11434`. Browser kena CORS, dan Ollama balas HTTP 403 untuk Origin non-localhost (Cloud Shell origin bukan localhost); di VPS/Cloud Shell :11434 sering tak terjangkau dari browser. Panggil same-origin `/ollama/api/...` — proxy Vite (dev) / nginx (prod) yang meneruskan ke Ollama sambil strip header Origin/Referer. Ganti ke `/ollama/...` lalu coba lagi."
+    on:
+      - hook: PreToolUse
+        tool: Write
+        file: "src/**/*.ts*"
+        content:
+          - kind: Regex
+            pattern: "(?i)(localhost|127\\.0\\.0\\.1):11434"
+      - hook: PreToolUse
+        tool: Edit
+        file: "src/**/*.ts*"
+        new_content:
+          - kind: Regex
+            pattern: "(?i)(localhost|127\\.0\\.0\\.1):11434"
+
+  # convertToExcalidrawElements me-REGENERATE id secara default — memecah
+  # addToGroup/connect/frame children yang merujuk id nanoid pre-assigned.
+  # Lihat: .nudge/learned/ea-converttoexcalidrawelements-regenerates-element-ids-by-default.md
+  #   dan: .nudge/learned/ea-container-labels-and-bound-arrows-connect.md
+  - name: ea-convert-pass-regenerate-ids
+    description: convertToExcalidrawElements wajib opsi regenerateIds eksplisit
+    message: "`convertToExcalidrawElements(...)` me-REGENERATE id elemen secara DEFAULT, jadi id nanoid yang sudah di-assign EA tidak lagi cocok — memecah `addToGroup`/`connect`/`label`/frame `children` dan merge-by-id di `addElementsToView`. Selalu kirim opsi eksplisit: `{ regenerateIds: false }` untuk workbench EA (referensi id dalam-batch harus stabil), atau `{ regenerateIds: true }` KHUSUS untuk hasil Mermaid (id self-contained, hindari tabrakan). Tambahkan argumen opsi lalu coba lagi."
+    on:
+      - hook: PreToolUse
+        tool: Write
+        file: "src/**/*.ts*"
+        content:
+          - kind: Regex
+            pattern: "convertToExcalidrawElements\\([^),]*\\)"
+      - hook: PreToolUse
+        tool: Edit
+        file: "src/**/*.ts*"
+        new_content:
+          - kind: Regex
+            pattern: "convertToExcalidrawElements\\([^),]*\\)"
+
+  # ─── Reminder prompt-time untuk subsistem inti (indeks ke .nudge/learned) ───
+
+  # Backend AI (Ollama lokal / ai-proxy -> OpenAI Responses API).
+  - name: ai-backend-reminder
+    description: Ingatkan invariant backend AI saat membahas Ollama/ai-proxy/OpenAI
+    message: |
+      Invariant backend AI repo ini (detail di .nudge/learned/):
+      - Browser SELALU panggil same-origin `/ollama/*`; proxy Vite (dev) & nginx (prod) strip Origin/Referer (Ollama balas 403 tanpa itu).
+        -> browser-ollama-use-the-vite-ollama-proxy-not-a-direct-call.md + production-ollama-proxy-nginx-mirror-of-the-vite-dev-proxy-3-gotchas.md
+      - `ai-proxy` (deploy/ai-proxy/server.js): luar = dialek Ollama, dalam = OpenAI Responses API (`/v1/responses`, default `gpt-5-mini`). system->`instructions`, sisanya->`input`. Model reasoning: JANGAN kirim temperature/top_p (400); pakai `reasoning.effort`. 429 `billing_not_active` = state akun OpenAI, bukan bug.
+        -> ai-proxy-ollama-compatible-shim-openai-responses-api-codex-mini-quirks.md
+      - System prompt operatif untuk KEDUA backend ada di `src/ai/ollama.ts` (REPLACE SYSTEM Modelfile saat runtime). Jaga `src/ai/ollama.ts` SYSTEM_PROMPT & `Modelfile` SYSTEM tetap sinkron.
+        -> testing-excalidraw-ea-a-request-system-message-replaces-the-modelfile-system.md
+      - Ganti model = edit `Modelfile` FROM (sumber asli) DAN `BASE_MODEL` di compose (pre-pull).
+        -> ollama-base-swap-ollama-create-uses-modelfile-from-not-base-model-3b-perf.md
+    on:
+      - hook: UserPromptSubmit
+        prompt:
+          - kind: Regex
+            pattern: "(?i)(ollama|ai-?proxy|openai|gpt-?5|qwen|excalidraw-ea|modelfile|generate.*script|backend ai|ai backend|num_predict|responses api)"
+
+  # ExcalidrawAutomate / convertToExcalidrawElements / frames / mermaid.
+  - name: ea-automate-reminder
+    description: Ingatkan invariant EA/convert saat membahas ExcalidrawAutomate
+    message: |
+      Invariant ExcalidrawAutomate (src/automate/ExcalidrawAutomate.ts) — detail di .nudge/learned/:
+      - `convertToExcalidrawElements` regenerate id default. Workbench EA pakai `{ regenerateIds: false }` (jaga id nanoid dalam-batch); Mermaid pakai `{ regenerateIds: true }`. Re-apply `groupIds` per id setelah convert.
+        -> ea-converttoexcalidrawelements-regenerates-element-ids-by-default.md
+      - Container label & bound arrow (`connect`) lewat skeleton API (label/start/end id); id from/to harus dari `add*` di run yang SAMA.
+        -> ea-container-labels-and-bound-arrows-connect.md
+      - Frame: emit CHILDREN sebelum elemen frame (`getElements()` urut `[...non-frame, ...frame]`); jangan kirim x/y/w/h=0 (dianggap unset -> auto-fit); children kosong -> throw.
+        -> ea-frames-convert-sets-frameid-auto-sizes-but-emit-children-before-the-frame.md
+      - `addMermaid`: pakai `@excalidraw/mermaid-to-excalidraw` (transitif), async + BROWSER-ONLY (tak bisa diuji di node/esbuild). Hanya flowchart jadi shape; tipe lain jadi 1 image. Tambah dep -> `npm install --package-lock-only`.
+        -> ea-addmermaid-use-excalidraw-mermaid-to-excalidraw-not-the-main-pkg-browser-only.md
+      - Tak ada test runner: verifikasi logika TS dengan bundle esbuild lalu node; convert yang menarik react-dom tak jalan di node (baca dist).
+        -> no-test-runner-verify-ts-logic-by-bundling-with-esbuild-then-node.md
+    on:
+      - hook: UserPromptSubmit
+        prompt:
+          - kind: Regex
+            pattern: "(?i)(excalidrawautomate|\\bea\\.|convertToExcalidrawElements|addFrame|addMermaid|addElementsToView|scene.?as.?code|scene code|scriptrunner|skeleton)"
+
+  # Ganti backend = ganti profile compose (local <-> cloud).
+  - name: compose-profile-switch-reminder
+    description: Ingatkan gotcha saat berpindah profile compose local/cloud
+    message: |
+      Berpindah backend AI = edit `.env` (`COMPOSE_PROFILES` + `AI_UPSTREAM`) lalu `docker compose up -d`. Gotcha (detail di .nudge/learned/):
+      - `--remove-orphans` TIDAK menghentikan service profile lain (service inaktif != orphan). Stop eksplisit: `docker compose stop ollama` / `stop ai-proxy`, cek `docker compose ps`.
+        -> switching-compose-profiles-remove-orphans-won-t-stop-the-other-profile-s-service.md
+      - `app` HARUS di-recreate saat switch supaya nginx re-templating `OLLAMA_HOST` dari `AI_UPSTREAM` baru (`docker compose up -d` melakukannya karena env berubah).
+      - Secret profile-spesifik pakai soft default `${VAR:-}`, jangan `:?` (memecah semua perintah compose).
+        -> compose-var-breaks-every-command-even-for-the-other-profile.md
+    on:
+      - hook: UserPromptSubmit
+        prompt:
+          - kind: Regex
+            pattern: "(?i)(compose.?profile|profile.?(local|cloud)|ganti backend|switch.*backend|COMPOSE_PROFILES|AI_UPSTREAM)"
