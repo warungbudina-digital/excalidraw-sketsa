@@ -33,6 +33,22 @@ type IdleWindow = Window & {
   cancelIdleCallback?: (id: number) => void;
 };
 
+// WebKit (Safari) ships the Fullscreen API only under vendor prefixes; the standard
+// DOM lib doesn't type them, so widen here instead of casting to `any`.
+type FullscreenDocument = Document & {
+  webkitFullscreenElement?: Element | null;
+  webkitExitFullscreen?: () => Promise<void> | void;
+};
+type FullscreenElement = HTMLElement & {
+  webkitRequestFullscreen?: () => Promise<void> | void;
+};
+
+// iPhone Safari exposes no element-level Fullscreen API (only <video>), so hide the
+// control there rather than offering a button that silently does nothing.
+const FULLSCREEN_SUPPORTED =
+  typeof document !== "undefined" &&
+  (document.fullscreenEnabled || "webkitFullscreenEnabled" in document);
+
 const SAMPLE_SCRIPT = `// EA script — 'ea' dan 'utils' sudah tersedia.
 // Select beberapa text element lalu jalankan untuk menambah "bullet" + grup.
 // Jika tidak ada teks terpilih, script ini menggambar contoh.
@@ -72,8 +88,11 @@ export default function Editor({ onLogout }: { onLogout: () => void }) {
   const suppressCollaborationUntil = useRef(0);
   const clientId = useRef(crypto.randomUUID().replace(/-/g, ""));
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const appRef = useRef<HTMLDivElement | null>(null);
 
   const [status, setStatus] = useState("");
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [zoomLocked, setZoomLocked] = useState(false);
   const [showScript, setShowScript] = useState(false);
   const [scriptCode, setScriptCode] = useState(SAMPLE_SCRIPT);
   const [aiPrompt, setAiPrompt] = useState("");
@@ -89,6 +108,55 @@ export default function Editor({ onLogout }: { onLogout: () => void }) {
     setStatus(message);
     window.setTimeout(() => setStatus(""), 3000);
   }, []);
+
+  // Toggle native fullscreen on the whole app shell (toolbar + canvas + script panel),
+  // so the canvas can fill the device screen for an immersive drawing mode.
+  const toggleFullscreen = useCallback(async () => {
+    const doc = document as FullscreenDocument;
+    const el = appRef.current as FullscreenElement | null;
+    if (!el) return;
+    try {
+      const active = document.fullscreenElement ?? doc.webkitFullscreenElement ?? null;
+      if (!active) {
+        if (el.requestFullscreen) await el.requestFullscreen();
+        else if (el.webkitRequestFullscreen) await el.webkitRequestFullscreen();
+        else throw new Error("Fullscreen API tidak tersedia di perangkat ini");
+      } else {
+        if (document.exitFullscreen) await document.exitFullscreen();
+        else if (doc.webkitExitFullscreen) await doc.webkitExitFullscreen();
+      }
+    } catch (e) {
+      flash(`Layar penuh gagal — ${(e as Error).message}`);
+    }
+  }, [flash]);
+
+  // Keep the button label in sync even when the user leaves fullscreen via Esc / OS gesture.
+  useEffect(() => {
+    const doc = document as FullscreenDocument;
+    const sync = () =>
+      setIsFullscreen(Boolean(document.fullscreenElement ?? doc.webkitFullscreenElement));
+    document.addEventListener("fullscreenchange", sync);
+    document.addEventListener("webkitfullscreenchange", sync);
+    return () => {
+      document.removeEventListener("fullscreenchange", sync);
+      document.removeEventListener("webkitfullscreenchange", sync);
+    };
+  }, []);
+
+  // Optional page-zoom lock for touch devices: while on, pinch zooms the Excalidraw canvas
+  // instead of the page. Scoped to the viewport meta and fully restored when turned off /
+  // on unmount, so accessibility (page zoom) is preserved by default.
+  useEffect(() => {
+    const meta = document.querySelector<HTMLMetaElement>('meta[name="viewport"]');
+    if (!meta) return;
+    const original = meta.content;
+    if (zoomLocked) {
+      meta.content = `${original}, maximum-scale=1, user-scalable=no`;
+    }
+    return () => {
+      meta.content = original;
+    };
+  }, [zoomLocked]);
 
   useEffect(() => {
     const worker = new Worker(new URL("./workers/autosave.worker.ts", import.meta.url), {
@@ -384,7 +452,7 @@ export default function Editor({ onLogout }: { onLogout: () => void }) {
   }, [currentScene, flash, sceneCodeBusy]);
 
   return (
-    <div className="app">
+    <div className="app" ref={appRef}>
       <header className="toolbar">
         <span className="brand">{COMPANY_NAME}</span>
         <button onClick={save}>Simpan</button>
@@ -404,6 +472,20 @@ export default function Editor({ onLogout }: { onLogout: () => void }) {
         <button onClick={() => fileInputRef.current?.click()}>Impor .md</button>
         <button onClick={() => setShowScript((v) => !v)}>
           {showScript ? "Tutup Script" : "Script"}
+        </button>
+        {FULLSCREEN_SUPPORTED && (
+          <button
+            onClick={() => void toggleFullscreen()}
+            title="Tampilkan kanvas memenuhi layar (mode menggambar)"
+          >
+            {isFullscreen ? "⛶ Keluar Layar Penuh" : "⛶ Layar Penuh"}
+          </button>
+        )}
+        <button
+          onClick={() => setZoomLocked((v) => !v)}
+          title="Kunci zoom halaman di perangkat sentuh — pinch hanya men-zoom kanvas, bukan halaman"
+        >
+          {zoomLocked ? "🔓 Buka Zoom" : "🔒 Kunci Zoom"}
         </button>
         {collaborationRoom ? (
           <span className="collaboration-controls" title={collaborators.map((user) => user.name).join(", ")}>

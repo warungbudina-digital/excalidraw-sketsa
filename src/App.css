@@ -1,7 +1,8 @@
 .app {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  height: 100vh; /* fallback untuk browser lama */
+  height: 100dvh; /* mobile: kecualikan address bar dinamis agar kanvas tak terpotong */
 }
 
 .toolbar {
