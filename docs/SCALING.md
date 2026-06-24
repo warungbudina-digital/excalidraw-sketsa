@@ -38,7 +38,7 @@ stays zero-dependency).
 
 ```bash
 # .env
-COMPOSE_PROFILES=cloud,scale        # add `scale` to whichever AI profile you use
+COMPOSE_PROFILES=scale              # enables the redis backplane service
 REDIS_URL=redis://redis:6379
 
 docker compose up -d --build --scale collab=2

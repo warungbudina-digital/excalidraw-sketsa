@@ -1,11 +1,12 @@
 # Deploy Runbook — Excalidraw Sketsa
 
-Manual, step-by-step deployment of the full stack: the web **app** (nginx), a private
-**Ollama** backend (with the custom `excalidraw-ea` model), and a **Cloudflare Zero Trust
-tunnel** that publishes the app with no inbound ports.
+Manual, step-by-step deployment of the full stack: the web **app** (nginx), the **`codex`**
+AI backend (Codex CLI on a ChatGPT subscription), the **`collab`** room server, and a
+**Cloudflare Zero Trust tunnel** that publishes the app with no inbound ports.
 
 This runbook is written for an **ephemeral Google Cloud Shell** (no swap, limited disk),
-but works on any Docker host. Times and sizes are approximate.
+but works on any Docker host. Times and sizes are approximate. See
+[ADR 0001](adr/0001-codex-cli-subscription-backend.md) for the AI-backend decision.
 
 ---
 
@@ -24,20 +25,22 @@ but works on any Docker host. Times and sizes are approximate.
         │   cloudflared ──┘                               │
         │       │ http://app:80                           │
         │   ┌───▼───┐  /ollama/*   ┌──────────┐           │
-        │   │  app  │─────────────▶│  ollama  │  (private, │
-        │   │ nginx │  reverse     │  :11434  │  no host   │
-        │   └───┬───┘  proxy       └──────────┘  port)     │
-        └───────┼──────────────────────────────────────────┘
-                │ host port (optional, ${APP_PORT}:80)
-            localhost:8080  ◀── Cloud Shell Web Preview / local testing
+        │   │  app  │─────────────▶│  codex   │  (private, │
+        │   │ nginx │  reverse     │  :8082   │  no host   │
+        │   └───┬───┘  proxy       └────┬─────┘  port)     │
+        └───────┼───────────────────────┼──────────────────┘
+                │ host port              │ codex exec -> api.openai.com (subscription)
+            localhost:8080  ◀── Web Preview / local testing
 ```
 
 - The browser only ever calls **same-origin `/ollama/*`**; nginx reverse-proxies it to the
-  `ollama` container. Ollama is **never** published to the host or internet.
+  `codex` container (the dialect name is legacy — the backend is Codex, not Ollama). `codex` is
+  **never** published to the host or internet.
+- `codex` runs the Codex CLI against your ChatGPT subscription; auth persists in a volume.
 - `cloudflared` makes an **outbound** connection to Cloudflare — no open inbound ports.
 
-Files involved: `Dockerfile`, `docker-compose.yml`, `Modelfile`,
-`deploy/nginx.conf.template`, `deploy/ollama-entrypoint.sh`, `.env`.
+Files involved: `Dockerfile`, `docker-compose.yml`, `deploy/codex/`,
+`deploy/nginx.conf.template`, `.env`.
 
 ---
 
@@ -46,13 +49,14 @@ Files involved: `Dockerfile`, `docker-compose.yml`, `Modelfile`,
 | Need | Check | Notes |
 |---|---|---|
 | Docker + Compose v2 | `docker --version && docker compose version` | Compose v2 syntax (no `version:` key). |
-| Free disk ≥ ~8 GB | `df -h /` | ollama image (~1.5 GB) + base model (~1 GB) + app/build layers. |
+| Free disk ≥ ~3 GB | `df -h /` | codex image (~0.7 GB) + app/build layers. (Far less than the old ollama model.) |
 | Free port for the app | `ss -ltn \| grep :8080` | Default `8080`. **Avoid Cloud Shell reserved ports: 22, 900, 922, 970, 971, 980, 981, 8998.** |
 | Cloudflare account w/ a domain on Cloudflare | — | Needed for the Zero Trust tunnel (Section 3). |
 
 > **Ephemeral host (Cloud Shell):** the VM disk and `$HOME` outside the project may reset
-> between sessions. **Commit your code to Git** before ending a session. Models are kept in
-> `~/ollama-data` so they are re-used, not re-downloaded, when that path survives.
+> between sessions. **Commit your code to Git** before ending a session. The Codex auth
+> credential is kept in `~/codex-auth` (the `codex-home` volume), so you stay logged in when
+> that path survives a reset.
 
 ---
 
@@ -90,8 +94,8 @@ Edit `.env`:
 
 ```dotenv
 CLOUDFLARE_TUNNEL_TOKEN=eyJ...your token from step 3...
-VITE_OLLAMA_MODEL=excalidraw-ea   # model baked into the app + built by ollama
 APP_PORT=8080                     # host port for the app (or remove the ports block)
+# CODEX_MODEL=                    # optional; empty = the model your subscription grants
 TZ=Asia/Jakarta                   # or Asia/Makassar; container log timezone
 ```
 
@@ -105,47 +109,45 @@ TZ=Asia/Jakarta                   # or Asia/Makassar; container log timezone
 
 ```bash
 docker compose up -d --build
+docker compose exec codex codex login --device-auth   # one-time; authorize on another device
 ```
 
-This builds the app image, starts ollama (which pulls the base model and builds
-`excalidraw-ea` on first boot — a few minutes), starts the app, and opens the tunnel.
+This builds the app + `codex` images, starts `collab` and `codex`, the app, and the tunnel.
+AI generation works after the **one-time Codex login** above.
 
 ### Option B — staged (recommended on a small/ephemeral host)
 
 Brings services up one at a time so you can watch disk/RAM and verify each step.
 
 ```bash
-# 1) Ollama first — it pulls the base model + builds excalidraw-ea in the background.
-docker compose up -d ollama
-docker compose logs -f ollama        # wait for: "ollama-init: ready (model in use: excalidraw-ea)"
+# 1) Build + start the app (nginx), collab, and codex.
+docker compose up -d --build app
 
-# 2) Build + start the app (nginx).
-docker compose build app
-docker compose up -d app
+# 2) Authenticate Codex (one-time). Prints a device code; authorize it in any browser.
+docker compose exec codex codex login --device-auth
+docker compose exec codex codex login status     # expect: logged in
 
 # 3) Open the tunnel.
 docker compose up -d cloudflared
 ```
 
-### AI backend: local Ollama ↔ cloud gpt-5.4-mini
+### AI backend: Codex CLI on a ChatGPT subscription
 
-The AI backend is pluggable; the app is unchanged either way (it always calls same-origin
-`/ollama/*`, and `ai-proxy` speaks the same Ollama dialect). Choose with two `.env` vars:
+The `codex` service is the only AI backend. The app is unchanged — it always calls same-origin
+`/ollama/*`; the shim translates to `codex exec` and validates the result before returning it.
 
 ```bash
-# Local: optional private on-VPS Ollama
-COMPOSE_PROFILES=local   AI_UPSTREAM=ollama:11434
+# Optional overrides in .env:
+CODEX_MODEL=                 # empty = the model your subscription grants
+CODEX_MAX_ATTEMPTS=2         # validation-gate retries on an invalid script
 
-# Cloud (default): OpenAI gpt-5.4-mini via ai-proxy
-COMPOSE_PROFILES=cloud   AI_UPSTREAM=ai-proxy:8080
-OPENAI_API_KEY=sk-...                 # server-side only; never in the browser bundle
-OPENAI_MODEL=gpt-5.4-mini
+# Authenticate once (credential persists to the codex-auth volume):
+docker compose exec codex codex login --device-auth
 ```
 
-After editing `.env`: `docker compose up -d --build` then `docker compose up -d --build app`
-(recreates the app so nginx picks up the new `AI_UPSTREAM`). Switching to `cloud` stops
-running on-VPS inference entirely; prompts then go to OpenAI (privacy/cost trade-off).
-`OPENAI_API_KEY` uses a soft default in compose, so the **local** backend never needs it.
+Honest trade-off (see [ADR 0001](adr/0001-codex-cli-subscription-backend.md)): no metered/local
+fallback; using a personal subscription as an automated backend may bump intended-use/rate
+limits; `codex exec` is heavier than a plain API call (mitigated by `read-only` + `--ephemeral`).
 
 ---
 
@@ -155,8 +157,8 @@ running on-VPS inference entirely; prompts then go to OpenAI (privacy/cost trade
 # All services Up:
 docker compose ps
 
-# (a) Ollama built the custom model:
-docker compose exec ollama ollama list          # excalidraw-ea and qwen2.5-coder:1.5b listed
+# (a) Codex backend is up and authenticated:
+docker compose exec codex codex login status    # expect: logged in
 
 # (b) App serves the SPA:
 curl -sf -o /dev/null -w "app: %{http_code}\n" http://localhost:8080/
@@ -164,17 +166,18 @@ curl -sf -o /dev/null -w "app: %{http_code}\n" http://localhost:8080/
 # (c) Collaboration service and nginx route are healthy:
 curl -sf http://localhost:8080/collab/healthz
 
-# (d) /ollama proxy works through the app, WITH a browser Origin (the 403 regression test):
-curl -s -o /dev/null -w "tags via proxy: %{http_code}\n" \
-  -H "Origin: https://example.cloudshell.dev" http://localhost:8080/ollama/api/tags
-# Expect 200 (would be 403 if nginx didn't strip Origin).
+# (d) /ollama proxy reaches the codex shim through the app:
+curl -s -o /dev/null -w "tags via proxy: %{http_code}\n" http://localhost:8080/ollama/api/tags
+# Expect 200.
 
-# (e) End-to-end generate through the proxy:
+# (e) End-to-end generate through the proxy (needs codex login; returns a validated EA script):
 curl -s http://localhost:8080/ollama/api/chat \
   -H "Content-Type: application/json" \
-  -d '{"model":"excalidraw-ea","stream":false,
-       "messages":[{"role":"user","content":"kotak berisi teks Halo dalam sebuah frame"}]}' \
+  -d '{"model":"codex","stream":false,
+       "messages":[{"role":"system","content":"You write EA scripts."},
+                   {"role":"user","content":"kotak berisi teks Halo dalam sebuah frame"}]}' \
   | head -c 400; echo
+# (without login -> HTTP 503 with a clear "codex backend" message, not a crash.)
 
 # (f) Tunnel registered connections to Cloudflare:
 docker compose logs cloudflared | grep -iE "Registered tunnel connection|Connection .* registered"
@@ -197,15 +200,17 @@ On Cloud Shell without the tunnel, use **Web Preview → port 8080**.
 
 ---
 
-## 7. Rebuild the custom model after editing `Modelfile`
+## 7. Codex authentication & re-login
 
 ```bash
-docker compose exec ollama ollama create excalidraw-ea -f /Modelfile
-# (no restart needed; the next generate uses the new model)
+docker compose exec codex codex login --device-auth   # (re)authorize; prints a device code
+docker compose exec codex codex login status          # check
+docker compose exec codex codex logout                # clear the stored credential
 ```
 
-To change the model the app requests, set `VITE_OLLAMA_MODEL` in `.env` and rebuild the app
-image: `docker compose up -d --build app` (the name is baked into the bundle at build time).
+The credential lives in the `codex-auth` volume (`/codex-home`), so it survives restarts. To
+change the model the shim requests, set `CODEX_MODEL` in `.env` and `docker compose up -d codex`.
+The EA knowledge stays in `src/ai/ollama.ts` (sent per request) — there is no model to rebuild.
 
 ---
 
@@ -215,18 +220,18 @@ image: `docker compose up -d --build app` (the name is baked into the bundle at 
 docker compose ps                 # status
 docker compose logs -f app        # nginx access/error logs
 docker compose logs -f collab     # room connections and server errors
-docker compose logs -f ollama     # model pull/build + inference logs
+docker compose logs -f codex      # codex shim + `codex exec` logs
 docker compose logs -f cloudflared
 
 docker compose restart app        # restart one service
 docker compose up -d --build app  # redeploy app after code changes
-docker compose pull ollama cloudflared && docker compose up -d  # update base images
+docker compose pull cloudflared && docker compose up -d  # update base images
 
-docker compose down               # stop + remove containers (keeps ~/ollama-data + images)
-docker compose down --rmi local   # also remove the built app image (frees disk)
+docker compose down               # stop + remove containers (keeps the codex-auth volume + images)
+docker compose down --rmi local   # also remove the built app/codex images (frees disk)
 ```
 
-The model data lives in `~/ollama-data` (host bind mount), so `down` does not delete it.
+The Codex credential lives in `~/codex-auth` (host bind mount), so `down` does not log you out.
 
 ---
 
@@ -235,12 +240,12 @@ The model data lives in `~/ollama-data` (host bind mount), so `down` does not de
 | Symptom | Cause / Fix |
 |---|---|
 | Browser AI fails, `curl ... -H "Origin: ..." /ollama/api/tags` returns **403** | nginx must strip `Origin`/`Referer` (it does in `deploy/nginx.conf.template`). Confirm the rendered config: `docker compose exec app cat /etc/nginx/conf.d/default.conf`. |
-| `/ollama/*` returns **502 / 504** | ollama not ready yet (still pulling/building the model) — watch `docker compose logs -f ollama`. Or DNS: the app resolves `ollama` via Docker DNS at request time (`resolver 127.0.0.11`); ensure both services share the compose network (`docker compose ps`). |
-| `ollama create` / generate: **model "excalidraw-ea" not found** | The init didn't build it. Run Section 7 manually and check `docker compose logs ollama` for "create failed". |
+| `/ollama/*` returns **502 / 504** | `codex` not up yet — watch `docker compose logs -f codex`. Or DNS: the app resolves `codex` via Docker DNS at request time (`resolver 127.0.0.11`); ensure both share the compose network (`docker compose ps`). |
+| Generate returns **503 "codex backend"** | Codex isn't authenticated (or its TLS/CA failed). Run `docker compose exec codex codex login --device-auth`, then `codex login status`. The shim's `/healthz` shows `"auth"`. |
 | Cloudflare hostname shows **502 Bad Gateway** | Tunnel is up but the Public Hostname isn't routed to `app:80`. Re-check Section 3 step 4 (Service = `HTTP`, URL = `app:80`). |
 | `cloudflared` exits / "**error parsing token**" | `CLOUDFLARE_TUNNEL_TOKEN` missing/wrong in `.env`. `docker compose config` should show it set. |
 | Compose error **"set CLOUDFLARE_TUNNEL_TOKEN in .env"** | The token var is required; put it in `.env` (Section 4). |
-| App build or a generate gets **OOM-killed** | Host has no swap. Don't run a big generate during the build; prefer the 1.5b model; build the app first, then exercise the model. |
+| App build gets **OOM-killed** | Host has no swap. Don't run heavy work during the build. Inference runs in OpenAI's cloud via Codex, so generation itself is light on the host. |
 | **Disk full** during pull/build | `docker system df` then `docker system prune -f` (and `docker compose down --rmi local`). Keep the app image small (it's nginx-only at runtime). |
 | Port **8080 already in use** | Another process (e.g. `npm run dev`) holds it. Set `APP_PORT=8081` in `.env` (avoid reserved ports) and `docker compose up -d app`. |
 
@@ -248,8 +253,9 @@ The model data lives in `~/ollama-data` (host bind mount), so `down` does not de
 
 ## 10. Security notes
 
-- **Ollama is private** — it has no `ports:` mapping; only the app (via nginx) and the host
-  Docker CLI reach it. Do not add a host port unless you intend to expose it.
+- **The `codex` backend is private** — no `ports:` mapping; only the app (via nginx) reaches it.
+  The ChatGPT-subscription credential lives in the `codex-auth` volume, never in the image or
+  the browser bundle. Do not add a host port.
 - The app's **login is a client-side gate only** (`src/auth/auth.ts`, demo `admin` /
   `mesari123`). It is **not** real auth — anyone with the URL can bypass it via devtools. For
   real protection, put the Cloudflare hostname behind a **Zero Trust Access policy**

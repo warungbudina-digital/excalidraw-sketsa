@@ -17,8 +17,8 @@ without Obsidian. It runs in the browser (e.g. on a VPS / Cloud Shell).
 - **Export / Import** a `.excalidraw.md` file.
 - **Run scripts** with an `ea` (Excalidraw Automate) object, just like the plugin.
 - **Scene as Code** turns the live canvas into a checksum-verified script that can recreate it.
-- **AI script generation** — describe what you want and a local Ollama model
-  (`qwen2.5-coder:1.5b`) writes the EA script for you.
+- **AI script generation** — describe what you want and the **Codex CLI** (on your ChatGPT
+  subscription) writes the EA script for you, validated server-side before it lands.
 
 ## Logic ported from the plugin
 
@@ -158,45 +158,25 @@ optional Redis backplane (pub/sub fan-out + shared snapshot + global presence) �
 via `REDIS_URL` and leaves the single-instance behaviour unchanged. See
 [**docs/SCALING.md**](docs/SCALING.md).
 
-## AI script generation (Ollama + Qwen)
+## AI script generation (Codex CLI)
 
-Open the **Script** panel → type a request in the prompt box → **✨ Generate**. The app
-calls a local **Ollama** container running **`qwen2.5-coder:1.5b`** and drops the
-generated EA script into the editor for you to review and **► Jalankan** (run).
+Open the **Script** panel → type a request in the prompt box → **✨ Generate**. The app posts
+to same-origin `/ollama/*`, which nginx forwards to the **`codex` backend** — a small shim that
+runs the **Codex CLI** (`codex exec`) against your **ChatGPT subscription** and returns an EA
+script. The script is dropped into the editor to review and **► Jalankan** (run).
 
-- `src/ai/ollama.ts` builds the request; the system prompt is an EA API cheat sheet +
-  a few-shot example so a small model produces usable scripts.
-- The browser calls same-origin `/ollama/*`, which `vite.config.ts` proxies to
-  `http://localhost:11434` — no CORS, and Ollama is never exposed publicly.
+- `src/ai/ollama.ts` builds the request and is the **single source of truth** for the EA system
+  prompt (API cheat sheet + few-shot). The backend is interchangeable; the app is unchanged.
+- The `codex` shim (`deploy/codex/server.js`) speaks the Ollama dialect outside and runs
+  `codex exec --ephemeral --skip-git-repo-check -s read-only` inside, then applies a
+  **validation gate**: the generated script must parse with the same `AsyncFunction` the runner
+  uses and must call `ea.*`; otherwise it re-prompts Codex (bounded retries).
 - Generated code is shown in the editor first (not auto-run).
 
-Start Ollama (Docker):
-
-```bash
-docker run -d --name ollama -p 11434:11434 -v ~/ollama-data:/root/.ollama ollama/ollama
-docker exec ollama ollama pull qwen2.5-coder:1.5b
-```
-
-The `-v ~/ollama-data` volume keeps the model in your home dir so it survives across
-sessions (the model is re-used, not re-downloaded). For better accuracy with more
-RAM/disk, swap in `qwen2.5-coder:7b`.
-
-### Custom model (`Modelfile`)
-
-The repo ships a **`Modelfile`** that bakes deep Excalidraw knowledge — the
-[JSON schema](https://docs.excalidraw.com/docs/codebase/json-schema), the
-[frames spec](https://docs.excalidraw.com/docs/codebase/frames), and the full EA API —
-into a custom model called **`excalidraw-ea`**, so a small model writes much better
-scripts (including frames). Build it once:
-
-```bash
-docker exec ollama ollama create excalidraw-ea -f /Modelfile   # Modelfile mounted by compose
-# or, on a host with the ollama CLI:  ollama create excalidraw-ea -f Modelfile
-```
-
-Point the app at it by setting `VITE_OLLAMA_MODEL=excalidraw-ea` at build/dev time (the
-Docker build and compose stack already default to this). `src/ai/ollama.ts` reads
-`import.meta.env.VITE_OLLAMA_MODEL` and falls back to `qwen2.5-coder:1.5b`.
+This is a deploy-time backend — see [**Deploy**](#deploy-docker--cloudflare-tunnel) and
+[ADR 0001](docs/adr/0001-codex-cli-subscription-backend.md). For local `npm run dev`, the AI
+needs a backend reachable at the `/ollama` proxy target (`vite.config.ts` → `:11434`): run the
+`codex` container (or any Ollama-dialect server) and point the dev proxy at it.
 
 ## Run
 
@@ -207,23 +187,24 @@ npm run build    # type-check + production build to dist/
 npm run preview  # serve the production build
 ```
 
-On Google Cloud Shell use **Web Preview → port 8080**. AI generation needs the Ollama
-container running (above); everything else works without it.
+On Google Cloud Shell use **Web Preview → port 8080**. AI generation needs an AI backend
+reachable at the `/ollama` proxy target (the `codex` container from **Deploy** below, or any
+Ollama-dialect server); everything else works without it.
 
 ## Deploy (Docker + Cloudflare Tunnel)
 
-The repo ships a stack that builds the app, exposes it over a **Cloudflare Zero Trust
-tunnel** (no inbound ports, no public IP), and lets you pick the **AI backend**:
+The repo ships a stack that builds the app and exposes it over a **Cloudflare Zero Trust
+tunnel** (no inbound ports, no public IP):
 
 | Service | What it does |
 |---|---|
-| `app` | Multi-stage build (Node → `nginx:alpine`); serves the static build and reverse-proxies `/ollama` (Origin/Referer stripped, like the dev proxy) to the chosen backend. |
+| `app` | Multi-stage build (Node → `nginx:alpine`); serves the static build and reverse-proxies `/ollama` (Origin/Referer stripped) and `/collab` to the backend services. |
 | `cloudflared` | Cloudflare tunnel; reaches `app:80` over the compose network and publishes it via your Zero Trust hostname. |
 | `collab` | Private live-collaboration room server. Exposed only through nginx `/collab/*`. |
-| `ollama` *(profile `local`)* | Optional private on-VPS LLM. Auto-pulls `qwen2.5-coder:3b-instruct` and builds `excalidraw-ea` from `Modelfile`. Never publishes a port. |
-| `ai-proxy` *(profile `cloud`)* | Default backend: Ollama-compatible shim → OpenAI **Responses API** (`gpt-5.4-mini`). Offloads inference to the cloud; the API key stays server-side. |
+| `codex` | AI backend: Ollama-dialect shim + **Codex CLI** (`codex exec`) on your **ChatGPT subscription**, plus a server-side script-validation gate. Never publishes a port. |
+| `redis` *(profile `scale`)* | Optional backplane to run >1 `collab` replica (see [docs/SCALING.md](docs/SCALING.md)). |
 
-See [**AI backend**](#ai-backend-local-ollama-vs-cloud-gpt-54-mini) below to choose between them.
+See [**AI backend (Codex)**](#ai-backend-codex-cli--chatgpt-subscription) below for login + how it works.
 
 ### 1. Create the tunnel
 
@@ -235,54 +216,46 @@ your hostname to the service **`http://app:80`**.
 
 ```bash
 cp .env.example .env          # paste CLOUDFLARE_TUNNEL_TOKEN into it
-docker compose up -d --build  # builds the app, cloud AI proxy, and tunnel
+docker compose up -d --build  # builds the app, codex backend, collab, and tunnel
+docker compose exec codex codex login --device-auth   # one-time: authorize on another device
 ```
 
 The app is then reachable at your Cloudflare hostname; locally it is available at
 `http://localhost:8080` (Cloud Shell: **Web Preview → 8080**).
 
-### AI backend: local Ollama vs cloud gpt-5.4-mini
+### AI backend: Codex CLI + ChatGPT subscription
 
-The backend is pluggable via `.env` — the browser app is unchanged either way (it always
-calls same-origin `/ollama/*`; `ai-proxy` speaks the same Ollama dialect):
+The `codex` service runs the **Codex CLI** on your **ChatGPT subscription** (flat cost, not a
+per-token API key). The browser/app are unchanged — they only ever call same-origin `/ollama/*`;
+the shim translates to `codex exec` and validates the result.
 
-| | `local` (Ollama) | `cloud` (gpt-5.4-mini) |
-|---|---|---|
-| Inference | on the VPS (CPU) | OpenAI cloud — VPS stays light |
-| Instruction-following | modest (3b) | strong (`gpt-5.4-mini`) |
-| Cost / privacy | free, fully private | per-token (cheap) + prompts go to OpenAI |
-| Needs | ~2 GB RAM + ~1 GB disk | `OPENAI_API_KEY` |
+- **Login once** (credential persists to the `codex-auth` volume):
+  `docker compose exec codex codex login --device-auth` — it prints a code; authorize it in a
+  browser on any device.
+- **Check status:** `curl` the app, or `docker compose exec codex codex login status`. The
+  shim's `/healthz` reports `"auth":"logged-in" | "not-logged-in"`.
+- `CODEX_MODEL` (in `.env`) is optional — empty uses the model your subscription grants.
+  `CODEX_MAX_ATTEMPTS` bounds the validation-gate retries.
 
-```bash
-# Optional local backend: private on-VPS Ollama
-COMPOSE_PROFILES=local   AI_UPSTREAM=ollama:11434      # in .env
-docker compose up -d --build
-
-# Cloud (default): OpenAI gpt-5.4-mini via ai-proxy
-COMPOSE_PROFILES=cloud   AI_UPSTREAM=ai-proxy:8080      # in .env
-OPENAI_API_KEY=sk-...                                  # in .env
-OPENAI_MODEL=gpt-5.4-mini
-docker compose up -d --build
-docker compose up -d --build app   # recreate app so nginx picks up the new upstream
-```
-
-The system prompt (EA + frames + Mermaid knowledge) is sent by the app, so it applies to
-**either** backend; `gpt-5.4-mini` avoids CPU-bound inference on the application host.
+> **Trade-off (see [ADR 0001](docs/adr/0001-codex-cli-subscription-backend.md)).** Codex is the
+> **only** backend — no metered/local fallback. Using a personal subscription as an automated
+> backend may bump intended-use/rate limits (your call). `codex exec` is heavier than a plain
+> API call (mitigated by `read-only` + `--ephemeral`).
 
 ### Files
 
 ```
 Dockerfile                    multi-stage app image (node build -> nginx runtime)
-docker-compose.yml            app + ollama + cloudflared
-Modelfile                     custom "excalidraw-ea" Ollama model (deep Excalidraw knowledge)
-deploy/nginx.conf.template    SPA serving + /ollama reverse proxy (envsubst-filled)
-deploy/ollama-entrypoint.sh   pulls base model + builds excalidraw-ea on first boot
+docker-compose.yml            app + collab + codex + cloudflared (+ redis, profile scale)
+deploy/codex/                 codex backend: Dockerfile + Ollama-dialect shim (server.js)
+deploy/collab/                live-collaboration room server (+ optional Redis backplane)
+deploy/nginx.conf.template    SPA serving + /ollama & /collab reverse proxy (envsubst-filled)
 .env.example                  tunnel token + optional overrides
 ```
 
 > **Notes.** Only `app` binds a host port (delete its `ports:` block to go tunnel-only).
-> Ollama is never exposed — the browser only ever talks to same-origin `/ollama/*`.
-> On a tiny host (Cloud Shell has no swap) prefer the 1.5b model to avoid OOM.
+> The `codex` backend never publishes a port — the browser only ever talks to same-origin
+> `/ollama/*`. The Codex auth credential lives in the `codex-auth` volume, never in the image.
 
 ## Known simplifications vs the plugin
 

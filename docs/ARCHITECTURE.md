@@ -64,12 +64,10 @@ flowchart TB
     subgraph compose["Host — Docker Compose"]
         app["app — nginx:alpine<br/>serve SPA + reverse proxy /ollama & /collab<br/>[Dockerfile, deploy/nginx.conf.template]"]
         collabsrv["collab — Node http<br/>room SSE + POST, in-memory, expire 1 jam<br/>[deploy/collab/server.js]"]
-        ollama["ollama — profile local<br/>qwen2.5-coder:3b-instruct / excalidraw-ea<br/>[Modelfile, deploy/ollama-entrypoint.sh]"]
-        aiproxy["ai-proxy — profile cloud<br/>shim dialek Ollama -> OpenAI Responses<br/>[deploy/ai-proxy/server.js]"]
+        codexsvc["codex — Node shim + Codex CLI<br/>dialek Ollama -> codex exec + gerbang validasi<br/>[deploy/codex/server.js, Dockerfile]"]
     end
 
-    openai["OpenAI Responses API"]
-    registry["Registry model Ollama"]
+    openai["OpenAI (Codex) — api.openai.com"]
 
     user -->|"menggambar"| spa
     spa <-->|"serialize scene"| worker
@@ -83,22 +81,19 @@ flowchart TB
     spa -->|"POST /ollama/api/chat (same-origin)"| app
     spa -->|"/collab/* — SSE turun + POST naik"| app
 
-    app -->|"AI_UPSTREAM (Origin/Referer di-strip)"| ollama
-    app -->|"AI_UPSTREAM (Origin/Referer di-strip)"| aiproxy
+    app -->|"AI_UPSTREAM=codex:8082"| codexsvc
     app -->|"COLLAB_HOST collab:8081"| collabsrv
 
-    aiproxy -->|"POST /v1/responses (key server-side)"| openai
-    ollama -->|"pull BASE_MODEL"| registry
+    codexsvc -->|"codex exec -> /v1/responses (auth langganan)"| openai
 ```
 
 Catatan jalur:
-- **`app` hanya container yang publik** (lewat `cloudflared`); `collab`, `ollama`, `ai-proxy`
-  tidak pernah membuka host port — hanya dijangkau via nginx di jaringan compose.
-- Browser **selalu** memanggil same-origin `/ollama/*` dan `/collab/*`; nginx me-`strip`
-  `Origin`/`Referer` (Ollama menolak 403 untuk Origin non-localhost). Lihat
-  [browser-ollama proxy note](../.nudge/learned/browser-ollama-use-the-vite-ollama-proxy-not-a-direct-call.md).
-- **Hanya satu** dari `ollama` / `ai-proxy` aktif (pilih `COMPOSE_PROFILES`); `app` di-recreate
-  saat switch agar nginx me-`envsubst` `AI_UPSTREAM` baru.
+- **`app` hanya container yang publik** (lewat `cloudflared`); `collab` dan `codex` tidak pernah
+  membuka host port — hanya dijangkau via nginx di jaringan compose.
+- Browser **selalu** memanggil same-origin `/ollama/*` (nama *dialek/kontrak*, bukan produk
+  Ollama) dan `/collab/*`. `src/ai/ollama.ts` tetap sumber tunggal system-prompt EA.
+- `codex` di-autentikasi **sekali** via `codex login --device-auth` (kredensial persist di
+  volume `/codex-home`). Lihat [ADR 0001](adr/0001-codex-cli-subscription-backend.md).
 
 ---
 
@@ -110,10 +105,9 @@ Catatan jalur:
 | autosave.worker | Web Worker | `src/workers/autosave.worker.ts` |
 | app | nginx:alpine (multi-stage build) | `Dockerfile`, `deploy/nginx.conf.template` |
 | collab | Node `http` | `deploy/collab/server.js`, `deploy/collab/Dockerfile` |
-| ollama (local) | Ollama + model kustom | `Modelfile`, `deploy/ollama-entrypoint.sh` |
-| ai-proxy (cloud) | Node `http` (tanpa dependency) | `deploy/ai-proxy/server.js` |
+| codex | Node shim (zero-dep) + Codex CLI | `deploy/codex/server.js`, `deploy/codex/Dockerfile` |
 | cloudflared | Cloudflare tunnel | `docker-compose.yml` |
-| Orkestrasi | Docker Compose (profiles `local`/`cloud`) | `docker-compose.yml`, `.env` |
+| Orkestrasi | Docker Compose (profile `scale` opsional utk redis) | `docker-compose.yml`, `.env` |
 
 ## Penyimpanan data
 
@@ -129,8 +123,8 @@ Catatan jalur:
 - **Produksi:** SPA statis di-serve `nginx`; reverse proxy `/ollama` & `/collab` di
   `deploy/nginx.conf.template`; publik lewat `cloudflared`.
 - **Dev (`npm run dev`, :8080):** Vite dev server yang mem-proxy `/ollama` ke
-  `http://localhost:11434` (`vite.config.ts`) — mirror dari proxy nginx, dengan strip
-  `Origin`/`Referer` yang sama.
+  `http://localhost:11434` (`vite.config.ts`). Catatan: backend produksi kini `codex` (bukan
+  Ollama on-host), tapi kontrak path `/ollama/*` tetap sama, jadi proxy dev tak perlu berubah.
 
 ## Memuat diagram ini ke kanvas
 
@@ -141,6 +135,6 @@ await ea.addMermaid(`flowchart TB
   user["Pengguna (browser)"] --> spa["SPA"]
   spa --> app["app (nginx)"]
   app --> collabsrv["collab"]
-  app --> aiproxy["ai-proxy"]`);
+  app --> codexsvc["codex (Codex CLI)"]`);
 await ea.addElementsToView();
 ```
