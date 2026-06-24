@@ -102,9 +102,11 @@ services:
       CODEX_MAX_ATTEMPTS: ${CODEX_MAX_ATTEMPTS:-2}
       TZ: ${TZ:-Asia/Jakarta}
     volumes:
-      # Persisted Codex auth (device-login credential) — survives restarts/session resets, like
-      # the old ollama-data. The `codex login --device-auth` writes here.
-      - ${CODEX_DATA:-${HOME}/codex-auth}:/codex-home
+      # Persisted Codex auth (device-login credential). A NAMED volume, NOT a host bind: Docker
+      # initialises it from the image's /codex-home, which is owned by the unprivileged `node`
+      # user, so codex can write the credential. (A host bind is created root-owned, which makes
+      # `codex login` fail with "permission denied" for the node user.)
+      - codex-auth:/codex-home
     # No `ports:` — reached only by the app over the compose network (AI_UPSTREAM=codex:8082).
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8082/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
@@ -125,3 +127,8 @@ services:
     depends_on:
       - app
     restart: unless-stopped
+
+volumes:
+  # Codex auth credential (node-owned, see the codex service). Persists across container
+  # restarts and `docker compose down`; removed by `docker compose down -v`.
+  codex-auth:

@@ -55,8 +55,9 @@ Files involved: `Dockerfile`, `docker-compose.yml`, `deploy/codex/`,
 
 > **Ephemeral host (Cloud Shell):** the VM disk and `$HOME` outside the project may reset
 > between sessions. **Commit your code to Git** before ending a session. The Codex auth
-> credential is kept in `~/codex-auth` (the `codex-home` volume), so you stay logged in when
-> that path survives a reset.
+> credential lives in the `codex-auth` **named volume** (node-owned, so login can write it);
+> it survives container restarts and `docker compose down`. A full VM recycle that wipes Docker
+> volumes means you re-run `codex login`.
 
 ---
 
@@ -231,7 +232,9 @@ docker compose down               # stop + remove containers (keeps the codex-au
 docker compose down --rmi local   # also remove the built app/codex images (frees disk)
 ```
 
-The Codex credential lives in `~/codex-auth` (host bind mount), so `down` does not log you out.
+The Codex credential lives in the `codex-auth` named volume, so `down` does not log you out
+(`docker compose down -v` would remove it). It is node-owned, so `codex login` can write it —
+a host bind mount would be root-owned and fail with "permission denied".
 
 ---
 
