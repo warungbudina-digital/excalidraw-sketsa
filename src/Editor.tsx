@@ -89,8 +89,10 @@ export default function Editor({ onLogout }: { onLogout: () => void }) {
   const clientId = useRef(crypto.randomUUID().replace(/-/g, ""));
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const appRef = useRef<HTMLDivElement | null>(null);
+  const runLogRef = useRef<HTMLDivElement | null>(null);
 
   const [status, setStatus] = useState("");
+  const [runLog, setRunLog] = useState<string[]>([]);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [zoomLocked, setZoomLocked] = useState(false);
   const [showScript, setShowScript] = useState(false);
@@ -157,6 +159,12 @@ export default function Editor({ onLogout }: { onLogout: () => void }) {
       meta.content = original;
     };
   }, [zoomLocked]);
+
+  // Keep the latest stage line visible as the run progresses.
+  useEffect(() => {
+    const el = runLogRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [runLog]);
 
   useEffect(() => {
     const worker = new Worker(new URL("./workers/autosave.worker.ts", import.meta.url), {
@@ -406,12 +414,19 @@ export default function Editor({ onLogout }: { onLogout: () => void }) {
     if (!api) {
       return;
     }
-    const ea = new ExcalidrawAutomate(api);
+    // Live stage log: each EA operation + the script's own console output reports a line, so
+    // the user sees how far the run got — and exactly which stage failed on error.
+    setRunLog(["▶ Menjalankan script…"]);
+    const pushLog = (message: string) => setRunLog((prev) => [...prev, message].slice(-300));
+    const ea = new ExcalidrawAutomate(api, pushLog);
+    const started = performance.now();
     try {
-      await runScript(scriptCode, ea, createDefaultUtils());
+      await runScript(scriptCode, ea, createDefaultUtils(), pushLog);
       save();
+      pushLog(`✓ Selesai (${Math.round(performance.now() - started)} ms)`);
       flash("Script selesai");
     } catch (e) {
+      pushLog(`✗ Gagal: ${(e as Error).message}`);
       flash(`Script error — ${(e as Error).message}`);
     }
   }, [scriptCode, save, flash]);
@@ -558,6 +573,32 @@ export default function Editor({ onLogout }: { onLogout: () => void }) {
             spellCheck={false}
             onChange={(e) => setScriptCode(e.target.value)}
           />
+          {runLog.length > 0 && (
+            <div className="run-log">
+              <div className="run-log-head">
+                <span>Output ({runLog.length})</span>
+                <button onClick={() => setRunLog([])}>Bersihkan</button>
+              </div>
+              <div className="run-log-body" ref={runLogRef}>
+                {runLog.map((line, i) => {
+                  const kind = line.startsWith("✓")
+                    ? "ok"
+                    : line.startsWith("✗")
+                      ? "err"
+                      : line.startsWith("⚠")
+                        ? "warn"
+                        : line.startsWith("▶")
+                          ? "info"
+                          : "";
+                  return (
+                    <div key={i} className={`run-log-line ${kind}`}>
+                      {line}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

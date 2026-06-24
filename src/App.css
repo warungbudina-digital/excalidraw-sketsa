@@ -196,3 +196,63 @@
   line-height: 1.5;
   outline: none;
 }
+
+/* Script run output — stage-by-stage progress log. */
+.run-log {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid #333;
+  background: #161616;
+  max-height: 120px;
+}
+
+.run-log-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 3px 12px;
+  font-size: 11px;
+  color: #888;
+  background: #1f1f1f;
+}
+
+.run-log-head button {
+  padding: 1px 8px;
+  border: none;
+  border-radius: 4px;
+  background: #333;
+  color: #ccc;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.run-log-body {
+  overflow-y: auto;
+  padding: 6px 12px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.run-log-line {
+  color: #b0b0b0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.run-log-line.ok {
+  color: #69db7c;
+}
+
+.run-log-line.err {
+  color: #ff8787;
+}
+
+.run-log-line.warn {
+  color: #ffd43b;
+}
+
+.run-log-line.info {
+  color: #74c0fc;
+}

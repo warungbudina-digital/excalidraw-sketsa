@@ -8,6 +8,7 @@ import {
 import { remapSceneForInsert } from "../src/scene-code/remap";
 import { loadSceneIntoApi } from "../src/scene-code/apply";
 import { sceneToEAScript } from "../src/scene-code/decompile";
+import { runScript, createDefaultUtils } from "../src/automate/scriptRunner";
 import type { ExcalidrawApi, SceneElement, SerializableScene } from "../src/types";
 
 const scene: SerializableScene = {
@@ -197,3 +198,19 @@ assert.match(script, /"f1"/, "referenced image file is included");
 assert.doesNotMatch(script, /"id":"gone"/, "tombstones are not decompiled");
 
 console.log("decompile tests: passed");
+
+// --- script runner: a script's console output is captured to the log channel ----------------
+const runnerLogs: string[] = [];
+await runScript(
+  'console.log("tahap 1"); console.log("nilai", 42); console.warn("hati-hati");',
+  {} as never,
+  createDefaultUtils(),
+  (message) => runnerLogs.push(message),
+);
+assert.deepEqual(
+  runnerLogs,
+  ["tahap 1", "nilai 42", "⚠ hati-hati"],
+  "console.log/warn from a script are forwarded to the UI log (objects stringified)",
+);
+
+console.log("script-runner tests: passed");
