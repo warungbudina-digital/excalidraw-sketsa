@@ -51,6 +51,10 @@ services:
       COLLAB_MAX_BODY_BYTES: 15000000
       COLLAB_MAX_CLIENTS_PER_ROOM: 25
       COLLAB_ROOM_TTL_MS: 3600000
+      # Horizontal-scaling backplane. EMPTY (default) = single-instance, in-memory, unchanged.
+      # Set to redis://redis:6379 + run >1 replica to scale (see docs/SCALING.md). collab keeps
+      # working (single-instance) if Redis is briefly unreachable, and reconnects automatically.
+      REDIS_URL: ${REDIS_URL:-}
       TZ: ${TZ:-Asia/Jakarta}
     # Private service: only nginx reaches it over the Compose network.
     healthcheck:
@@ -59,6 +63,24 @@ services:
       timeout: 5s
       retries: 3
       start_period: 5s
+    restart: unless-stopped
+
+  # Optional horizontal-scaling backplane for `collab` (profile: scale). DISABLED by default —
+  # without it, collab stays single-instance exactly as before. Enable by adding `scale` to
+  # COMPOSE_PROFILES and setting REDIS_URL=redis://redis:6379, then `--scale collab=2`.
+  # See docs/SCALING.md.
+  redis:
+    image: redis:7-alpine
+    profiles: ["scale"]
+    # Pure backplane/cache: no persistence, bounded memory (collab rooms already expire ~1h).
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    # No host port — only `collab` reaches it over the compose network.
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 3s
     restart: unless-stopped
 
   ollama:

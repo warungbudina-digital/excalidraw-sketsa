@@ -153,6 +153,11 @@ leaves. A room URL is a capability secret: anyone with the URL can join. The cur
 client-side login is not server authorization, so put the site behind Cloudflare Access
 before using collaboration with sensitive drawings.
 
+Single-instance by default. To run **multiple `collab` replicas** behind nginx, enable the
+optional Redis backplane (pub/sub fan-out + shared snapshot + global presence) — it is opt-in
+via `REDIS_URL` and leaves the single-instance behaviour unchanged. See
+[**docs/SCALING.md**](docs/SCALING.md).
+
 ## AI script generation (Ollama + Qwen)
 
 Open the **Script** panel → type a request in the prompt box → **✨ Generate**. The app
