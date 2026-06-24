@@ -25,9 +25,10 @@ FROM nginx:1.27-alpine AS runtime
 # $uri/$host/$1 are left intact.
 COPY deploy/nginx.conf.template /etc/nginx/templates/default.conf.template
 
-# The app container reaches Ollama over the compose network (service name "ollama"),
-# never over the host's localhost. Override at run time if your Ollama lives elsewhere.
-ENV OLLAMA_HOST=ollama:11434
+# The upstream nginx forwards /ollama/* to, over the compose network. Defaults to the codex
+# shim (service "codex"); compose overrides it from AI_UPSTREAM. The var name is the legacy
+# dialect name, not the Ollama product.
+ENV OLLAMA_HOST=codex:8082
 ENV COLLAB_HOST=collab:8081
 ENV NGINX_ENVSUBST_FILTER="OLLAMA_|COLLAB_"
 

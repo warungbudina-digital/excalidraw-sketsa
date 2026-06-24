@@ -27,19 +27,17 @@ flowchart TB
     end
 
     cf["Cloudflare Zero Trust<br/>(tunnel publikasi, tanpa inbound port)"]
-    openai["OpenAI Responses API<br/>(gpt-5.4-mini — backend AI cloud)"]
-    registry["Registry model Ollama<br/>(base model — backend AI lokal)"]
+    openai["OpenAI (Codex)<br/>via langganan ChatGPT — backend AI"]
 
     user -->|"HTTPS (lewat tunnel)"| app
     collab -->|"HTTPS + SSE: join room, sinkron scene"| app
     app -.->|"dipublikasikan lewat"| cf
-    app -->|"prompt EA script, key server-side"| openai
-    app -->|"tarik base model saat init"| registry
+    app -->|"prompt EA script (Codex CLI, auth langganan)"| openai
 ```
 
-Catatan: backend AI **pluggable** — hanya **satu** yang aktif. `cloud` memakai OpenAI
-(garis ke `openai`), `local` memakai Ollama on-host (garis ke `registry`). Lihat
-[AI backend](../README.md#ai-backend-local-ollama-vs-cloud-gpt-54-mini).
+Catatan: backend AI = **`codex`** (Codex CLI + langganan ChatGPT) di balik shim dialek-Ollama,
+dengan gerbang validasi script di sisi server. Lihat
+[ADR 0001](adr/0001-codex-cli-subscription-backend.md).
 
 ---
 

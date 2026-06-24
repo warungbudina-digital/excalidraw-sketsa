@@ -1,21 +1,22 @@
-# Excalidraw Sketsa — production stack with a PLUGGABLE AI backend.
+# Excalidraw Sketsa — production stack.
 #
 #   app         the built web app, served by nginx (reverse-proxies /ollama -> AI backend)
 #   cloudflared Cloudflare Zero Trust tunnel — publishes the app with no inbound ports
 #   collab      private SSE/HTTP room server for live canvas collaboration
-#   ollama      [profile: local] private on-VPS LLM; builds the custom "excalidraw-ea" model
-#   ai-proxy    [profile: cloud] tiny Ollama-compatible shim -> OpenAI Responses API (gpt-5.4-mini)
+#   codex       AI backend: Codex CLI (ChatGPT subscription) behind an Ollama-dialect shim
+#   redis       [profile: scale] optional backplane to run >1 collab replica (see docs/SCALING.md)
 #
-# Pick ONE backend with a Compose profile (set COMPOSE_PROFILES + AI_UPSTREAM in .env):
-#   local  -> COMPOSE_PROFILES=local  AI_UPSTREAM=ollama:11434     (private, free, heavier VPS)
-#   cloud  -> COMPOSE_PROFILES=cloud  AI_UPSTREAM=ai-proxy:8080    (light VPS, needs OPENAI_API_KEY)
+# AI backend = `codex` (the only one). The app/browser/nginx only ever speak the /ollama/* dialect;
+# the codex shim translates to the Codex CLI. Authenticate ONCE after first start:
+#   docker compose exec codex codex login --device-auth
+# See deploy/codex/ + docs/adr/0001-codex-cli-subscription-backend.md.
 #
 # Quick start:
-#   cp .env.example .env      # set CLOUDFLARE_TUNNEL_TOKEN, COMPOSE_PROFILES, AI_UPSTREAM, ...
+#   cp .env.example .env      # set CLOUDFLARE_TUNNEL_TOKEN (+ optional overrides)
 #   docker compose up -d --build
+#   docker compose exec codex codex login --device-auth
 #
-# The app reaches the backend over the compose network (AI_UPSTREAM); neither backend binds a
-# host port. cloudflared is outbound-only. See README "Deploy" + docs/RUNBOOK.md.
+# No backend binds a host port; cloudflared is outbound-only. See README "Deploy" + docs/RUNBOOK.md.
 
 services:
   app:
@@ -23,13 +24,13 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        # Bakes the model name the browser asks for into the bundle (used by the ollama
-        # backend; ai-proxy ignores it and uses OPENAI_MODEL).
-        VITE_OLLAMA_MODEL: ${VITE_OLLAMA_MODEL:-excalidraw-ea}
+        # The `model` string the browser sends in the Ollama-dialect request. The codex shim
+        # ignores it (the model is whatever the subscription grants); kept for dialect parity.
+        VITE_OLLAMA_MODEL: ${VITE_OLLAMA_MODEL:-codex}
     image: excalidraw-sketsa:latest
     environment:
-      # Which backend nginx forwards /ollama/* to. Swap to ai-proxy:8080 for the cloud backend.
-      OLLAMA_HOST: ${AI_UPSTREAM:-ollama:11434}
+      # Upstream nginx forwards /ollama/* to. Defaults to the codex shim; override via AI_UPSTREAM.
+      OLLAMA_HOST: ${AI_UPSTREAM:-codex:8082}
       COLLAB_HOST: collab:8081
       TZ: ${TZ:-Asia/Jakarta}
     ports:
@@ -38,6 +39,8 @@ services:
       - "${APP_PORT:-8080}:80"
     depends_on:
       collab:
+        condition: service_healthy
+      codex:
         condition: service_healthy
     restart: unless-stopped
 
@@ -83,47 +86,32 @@ services:
       start_period: 3s
     restart: unless-stopped
 
-  ollama:
-    image: ollama/ollama:latest
-    profiles: ["local"]
-    # Start the server, then pull the base model + build excalidraw-ea from /Modelfile.
-    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+  # AI backend: Codex CLI (ChatGPT subscription) behind an Ollama-dialect shim + a server-side
+  # script-validation gate. The app/nginx are unchanged (they only speak /ollama/*). The shim
+  # runs `codex exec` headless; the EA system prompt comes from the app per request (src/ai/
+  # ollama.ts stays the single source of truth). Auth ONCE: `codex login --device-auth`.
+  codex:
+    build:
+      context: ./deploy/codex
+      dockerfile: Dockerfile
+    image: excalidraw-sketsa-codex:latest
     environment:
-      BASE_MODEL: qwen2.5-coder:3b-instruct
-      CUSTOM_MODEL: ${VITE_OLLAMA_MODEL:-excalidraw-ea}
+      PORT: 8082
+      # Empty = the model the subscription grants (Codex default). Override only if needed.
+      CODEX_MODEL: ${CODEX_MODEL:-}
+      CODEX_MAX_ATTEMPTS: ${CODEX_MAX_ATTEMPTS:-2}
       TZ: ${TZ:-Asia/Jakarta}
     volumes:
-      - ./deploy/ollama-entrypoint.sh:/entrypoint.sh:ro
-      - ./Modelfile:/Modelfile:ro
-      # Persist models in $HOME so they survive Cloud Shell session resets (re-used, not
-      # re-downloaded). Named docker volumes can be wiped when the ephemeral VM recycles.
-      - ${OLLAMA_DATA:-${HOME}/ollama-data}:/root/.ollama
-    # No `ports:` — Ollama stays private; only the app (via nginx) and the host CLI reach it.
+      # Persisted Codex auth (device-login credential) — survives restarts/session resets, like
+      # the old ollama-data. The `codex login --device-auth` writes here.
+      - ${CODEX_DATA:-${HOME}/codex-auth}:/codex-home
+    # No `ports:` — reached only by the app over the compose network (AI_UPSTREAM=codex:8082).
     healthcheck:
-      test: ["CMD", "ollama", "list"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8082/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 40s
-    restart: unless-stopped
-
-  ai-proxy:
-    build:
-      context: ./deploy/ai-proxy
-      dockerfile: Dockerfile
-    image: excalidraw-sketsa-ai-proxy:latest
-    profiles: ["cloud"]
-    environment:
-      # Inference runs in OpenAI's cloud, so the key stays here (server-side) — NEVER in the
-      # browser bundle. The app/browser only ever sees same-origin /ollama/*. Soft default
-      # (not `:?`): a hard-required var would break EVERY compose command (incl. the local
-      # backend) since interpolation runs before profile filtering. ai-proxy errors clearly
-      # at runtime if it's empty.
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5.4-mini}
-      OPENAI_REASONING_EFFORT: ${OPENAI_REASONING_EFFORT:-low}
-      TZ: ${TZ:-Asia/Jakarta}
-    # No `ports:` — reached only by the app over the compose network (AI_UPSTREAM=ai-proxy:8080).
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
 
   cloudflared:
