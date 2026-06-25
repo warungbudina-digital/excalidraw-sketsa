@@ -438,7 +438,7 @@ export default function Editor({ onLogout }: { onLogout: () => void }) {
       return;
     }
     setAiBusy(true);
-    const backendLabel = aiBackend === "codex" ? OLLAMA_MODEL : "Claude";
+    const backendLabel = aiBackend === "codex" ? OLLAMA_MODEL : aiBackend === "claude" ? "Claude" : "Antigravity";
     flash(`Menghubungi ${backendLabel}…`);
     try {
       // Pass the current editor script as context so the AI can EDIT/extend an existing scene
@@ -567,21 +567,21 @@ export default function Editor({ onLogout }: { onLogout: () => void }) {
           </div>
           <div className="ai-backend-row">
             <span>AI:</span>
-            {(["codex", "claude"] as const).map((b) => (
+            {(["codex", "claude", "agy"] as const).map((b) => (
               <button
                 key={b}
                 className={`backend-chip${aiBackend === b ? " active" : ""}`}
                 onClick={() => setAiBackend(b)}
                 disabled={aiBusy}
               >
-                {b === "codex" ? `Codex (${OLLAMA_MODEL})` : "Claude"}
+                {b === "codex" ? `Codex (${OLLAMA_MODEL})` : b === "claude" ? "Claude" : "Antigravity"}
               </button>
             ))}
           </div>
           <div className="ai-row">
             <input
               className="ai-input"
-              placeholder={`Minta ${aiBackend === "codex" ? OLLAMA_MODEL : "Claude"} membuat script… atau pilih template di atas`}
+              placeholder={`Minta ${aiBackend === "codex" ? OLLAMA_MODEL : aiBackend === "claude" ? "Claude" : "Antigravity"} membuat script… atau pilih template di atas`}
               value={aiPrompt}
               disabled={aiBusy}
               onChange={(e) => setAiPrompt(e.target.value)}

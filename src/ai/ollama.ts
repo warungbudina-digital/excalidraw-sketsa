@@ -15,11 +15,12 @@
 export const OLLAMA_MODEL = import.meta.env.VITE_OLLAMA_MODEL?.trim() || "qwen2.5-coder:1.5b";
 
 /** AI backend that the user has selected in the Script panel. */
-export type AIBackend = "codex" | "claude";
+export type AIBackend = "codex" | "claude" | "agy";
 
 const BACKEND_ENDPOINTS: Record<AIBackend, string> = {
   codex: "/ollama/api/chat",
   claude: "/claude/api/chat",
+  agy: "/agy/api/chat",
 };
 
 const SYSTEM_PROMPT = `You write scripts for "Excalidraw Sketsa", a drawing app.

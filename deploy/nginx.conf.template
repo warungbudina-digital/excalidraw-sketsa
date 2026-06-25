@@ -87,4 +87,21 @@ server {
         proxy_read_timeout 600s;
         proxy_send_timeout 600s;
     }
+
+    # Reverse proxy to the Antigravity CLI (agy) backend — third parallel route.
+    # Browser picks /agy/ when the user selects "Antigravity" in the Script panel toggle.
+    location /agy/ {
+        set $agy_upstream ${AGY_HOST};
+        rewrite ^/agy/(.*)$ /$1 break;
+        proxy_pass http://$agy_upstream;
+
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Origin "";
+        proxy_set_header Referer "";
+
+        proxy_buffering off;
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
+    }
 }

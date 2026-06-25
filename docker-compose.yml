@@ -34,6 +34,8 @@ services:
       COLLAB_HOST: collab:8081
       # Upstream nginx forwards /claude/* to (the Claude AI backend shim).
       CLAUDE_HOST: ${CLAUDE_UPSTREAM:-claude:8083}
+      # Upstream nginx forwards /agy/* to (the Antigravity CLI backend shim).
+      AGY_HOST: ${AGY_UPSTREAM:-agy:8084}
       TZ: ${TZ:-Asia/Jakarta}
     ports:
       # Host:container. For Cloud Shell use Web Preview on 8080. If you only access the app
@@ -146,6 +148,35 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  # AI backend: Antigravity CLI (`agy --print`) behind an Ollama-dialect shim — parallel
+  # to the codex and claude services. App/nginx/src/ai/ollama.ts are UNCHANGED; browser
+  # calls /agy/*. Auth ONCE (credentials persist to the `agy-auth` named volume at HOME=/agy-home):
+  #   docker compose exec agy agy
+  #   (follow the Google OAuth URL it prints — no dedicated `auth` subcommand)
+  agy:
+    build:
+      context: ./deploy/agy
+      dockerfile: Dockerfile
+    image: excalidraw-sketsa-agy:latest
+    environment:
+      PORT: 8084
+      # Empty = Antigravity CLI default model. Override only if needed.
+      AGY_MODEL: ${AGY_MODEL:-}
+      AGY_MAX_ATTEMPTS: ${AGY_MAX_ATTEMPTS:-2}
+      TZ: ${TZ:-Asia/Jakarta}
+    volumes:
+      # Persisted agy auth ($HOME/.config/antigravity written by interactive `agy` OAuth flow).
+      # A NAMED volume so the unprivileged `node` user can write to it (host bind is root-owned).
+      - agy-auth:/agy-home
+    # No `ports:` — reached only by nginx over the compose network (/agy/* -> agy:8084).
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8084/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+
   cloudflared:
     image: cloudflare/cloudflared:latest
     # Token-based (Zero Trust dashboard-managed) tunnel. In the dashboard, point the
@@ -164,3 +195,5 @@ volumes:
   codex-auth:
   # Claude Code auth ($HOME/.claude written by `claude auth login`). Same pattern as codex-auth.
   claude-auth:
+  # Antigravity CLI auth ($HOME/.config/antigravity written by interactive `agy` OAuth flow). Same pattern.
+  agy-auth:
