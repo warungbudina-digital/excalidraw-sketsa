@@ -5,6 +5,23 @@
 # from the container env. NGINX_ENVSUBST_FILTER (set in the Dockerfile) limits substitution
 # to our OLLAMA_* and COLLAB_* vars, so nginx's own $uri/$host/$1 stay intact.
 
+# ---------------------------------------------------------------------------
+# AI generation rate limiting (http context — file is included inside http{})
+#
+# Real client IP: Cloudflare sets CF-Connecting-IP; fall back to the direct
+# connection IP for local/dev access (when Cloudflare tunnel is not in use).
+# ---------------------------------------------------------------------------
+map $http_cf_connecting_ip $ai_rate_key {
+    ""      $binary_remote_addr;
+    default $http_cf_connecting_ip;
+}
+
+# 10 requests/minute per real IP across all AI backends combined.
+# burst=5: absorb short bursts (quick edits / retries) without 429.
+# nodelay: serve burst slots immediately; excess requests get 429 at once.
+limit_req_zone $ai_rate_key zone=ai_gen:10m rate=10r/m;
+limit_req_status 429;
+
 server {
     listen       80;
     server_name  _;
@@ -55,6 +72,8 @@ server {
     # requests whose Origin isn't localhost; clearing them makes Ollama treat the proxied
     # call as a non-browser client (same fix as the dev proxy).
     location /ollama/ {
+        limit_req zone=ai_gen burst=5 nodelay;
+
         set $ollama_upstream ${OLLAMA_HOST};
         rewrite ^/ollama/(.*)$ /$1 break;
         proxy_pass http://$ollama_upstream;
@@ -74,6 +93,8 @@ server {
     # Reverse proxy to the Claude AI backend (same dialect as /ollama/, parallel route).
     # Browser picks /claude/ when the user selects "Claude" in the Script panel toggle.
     location /claude/ {
+        limit_req zone=ai_gen burst=5 nodelay;
+
         set $claude_upstream ${CLAUDE_HOST};
         rewrite ^/claude/(.*)$ /$1 break;
         proxy_pass http://$claude_upstream;
@@ -91,6 +112,8 @@ server {
     # Reverse proxy to the Antigravity CLI (agy) backend — third parallel route.
     # Browser picks /agy/ when the user selects "Antigravity" in the Script panel toggle.
     location /agy/ {
+        limit_req zone=ai_gen burst=5 nodelay;
+
         set $agy_upstream ${AGY_HOST};
         rewrite ^/agy/(.*)$ /$1 break;
         proxy_pass http://$agy_upstream;
