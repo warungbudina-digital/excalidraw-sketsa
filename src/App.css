@@ -178,6 +178,47 @@
   color: #d0bfff;
 }
 
+.ai-backend-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  background: #252525;
+}
+
+.ai-backend-row > span {
+  font-size: 11px;
+  color: #666;
+  flex: 0 0 auto;
+}
+
+.backend-chip {
+  padding: 2px 10px;
+  border: 1px solid #3a3a3a;
+  border-radius: 10px;
+  background: #2a2a2a;
+  color: #777;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.backend-chip:hover:not(:disabled) {
+  border-color: #555;
+  color: #bbb;
+}
+
+.backend-chip.active {
+  border-color: #7048e8;
+  background: #2d1b5c;
+  color: #c5b3f7;
+}
+
+.backend-chip:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .ai-row {
   display: flex;
   gap: 8px;

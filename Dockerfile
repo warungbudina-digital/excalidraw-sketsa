@@ -30,7 +30,7 @@ COPY deploy/nginx.conf.template /etc/nginx/templates/default.conf.template
 # dialect name, not the Ollama product.
 ENV OLLAMA_HOST=codex:8082
 ENV COLLAB_HOST=collab:8081
-ENV NGINX_ENVSUBST_FILTER="OLLAMA_|COLLAB_"
+ENV NGINX_ENVSUBST_FILTER="OLLAMA_|COLLAB_|CLAUDE_"
 
 COPY --from=build /app/dist /usr/share/nginx/html
 

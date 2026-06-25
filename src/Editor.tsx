@@ -5,7 +5,7 @@ import { curateAppState, serializeScene } from "./io/serialize";
 import { parseScene } from "./io/parse";
 import { ExcalidrawAutomate } from "./automate/ExcalidrawAutomate";
 import { createDefaultUtils, runScript } from "./automate/scriptRunner";
-import { generateScript, OLLAMA_MODEL, PROMPT_PRESETS } from "./ai/ollama";
+import { generateScript, OLLAMA_MODEL, PROMPT_PRESETS, type AIBackend } from "./ai/ollama";
 import { COMPANY_NAME } from "./auth/auth";
 import { sceneToEAScript } from "./scene-code/decompile";
 import {
@@ -97,6 +97,7 @@ export default function Editor({ onLogout }: { onLogout: () => void }) {
   const [zoomLocked, setZoomLocked] = useState(false);
   const [showScript, setShowScript] = useState(false);
   const [scriptCode, setScriptCode] = useState(SAMPLE_SCRIPT);
+  const [aiBackend, setAiBackend] = useState<AIBackend>("codex");
   const [aiPrompt, setAiPrompt] = useState("");
   const [aiBusy, setAiBusy] = useState(false);
   const [sceneCodeBusy, setSceneCodeBusy] = useState(false);
@@ -437,11 +438,12 @@ export default function Editor({ onLogout }: { onLogout: () => void }) {
       return;
     }
     setAiBusy(true);
-    flash(`Menghubungi ${OLLAMA_MODEL}…`);
+    const backendLabel = aiBackend === "codex" ? OLLAMA_MODEL : "Claude";
+    flash(`Menghubungi ${backendLabel}…`);
     try {
       // Pass the current editor script as context so the AI can EDIT/extend an existing scene
       // (e.g. a Scene → Code decompilation), not just generate from scratch.
-      const code = await generateScript(prompt, { currentScript: scriptCode });
+      const code = await generateScript(prompt, { currentScript: scriptCode, backend: aiBackend });
       setScriptCode(code);
       flash("Script dibuat AI — tinjau lalu ► Jalankan");
     } catch (e) {
@@ -563,10 +565,23 @@ export default function Editor({ onLogout }: { onLogout: () => void }) {
               </button>
             ))}
           </div>
+          <div className="ai-backend-row">
+            <span>AI:</span>
+            {(["codex", "claude"] as const).map((b) => (
+              <button
+                key={b}
+                className={`backend-chip${aiBackend === b ? " active" : ""}`}
+                onClick={() => setAiBackend(b)}
+                disabled={aiBusy}
+              >
+                {b === "codex" ? `Codex (${OLLAMA_MODEL})` : "Claude"}
+              </button>
+            ))}
+          </div>
           <div className="ai-row">
             <input
               className="ai-input"
-              placeholder={`Minta ${OLLAMA_MODEL} membuat script… atau pilih template di atas`}
+              placeholder={`Minta ${aiBackend === "codex" ? OLLAMA_MODEL : "Claude"} membuat script… atau pilih template di atas`}
               value={aiPrompt}
               disabled={aiBusy}
               onChange={(e) => setAiPrompt(e.target.value)}

@@ -32,6 +32,8 @@ services:
       # Upstream nginx forwards /ollama/* to. Defaults to the codex shim; override via AI_UPSTREAM.
       OLLAMA_HOST: ${AI_UPSTREAM:-codex:8082}
       COLLAB_HOST: collab:8081
+      # Upstream nginx forwards /claude/* to (the Claude AI backend shim).
+      CLAUDE_HOST: ${CLAUDE_UPSTREAM:-claude:8083}
       TZ: ${TZ:-Asia/Jakarta}
     ports:
       # Host:container. For Cloud Shell use Web Preview on 8080. If you only access the app
@@ -116,6 +118,34 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  # AI backend: Claude Code CLI (`claude --print`) behind an Ollama-dialect shim — parallel
+  # to the codex service. App/nginx/src/ai/ollama.ts are UNCHANGED; browser calls /claude/*.
+  # Auth ONCE (credential persists to the `claude-auth` named volume at HOME=/claude-home):
+  #   docker compose exec claude claude auth login
+  claude:
+    build:
+      context: ./deploy/claude
+      dockerfile: Dockerfile
+    image: excalidraw-sketsa-claude:latest
+    environment:
+      PORT: 8083
+      # Empty = Claude Code CLI default model. Override only if needed.
+      CLAUDE_MODEL: ${CLAUDE_MODEL:-}
+      CLAUDE_MAX_ATTEMPTS: ${CLAUDE_MAX_ATTEMPTS:-2}
+      TZ: ${TZ:-Asia/Jakarta}
+    volumes:
+      # Persisted Claude Code auth ($HOME/.claude). A NAMED volume so `claude auth login`
+      # can write to it as the unprivileged `node` user (host bind would be root-owned).
+      - claude-auth:/claude-home
+    # No `ports:` — reached only by nginx over the compose network (/claude/* -> claude:8083).
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8083/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
   cloudflared:
     image: cloudflare/cloudflared:latest
     # Token-based (Zero Trust dashboard-managed) tunnel. In the dashboard, point the
@@ -132,3 +162,5 @@ volumes:
   # Codex auth credential (node-owned, see the codex service). Persists across container
   # restarts and `docker compose down`; removed by `docker compose down -v`.
   codex-auth:
+  # Claude Code auth ($HOME/.claude written by `claude auth login`). Same pattern as codex-auth.
+  claude-auth:

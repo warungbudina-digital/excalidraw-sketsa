@@ -13,7 +13,14 @@
  * the deep Excalidraw knowledge below. Keep this prompt and the Modelfile SYSTEM in sync.
  */
 export const OLLAMA_MODEL = import.meta.env.VITE_OLLAMA_MODEL?.trim() || "qwen2.5-coder:1.5b";
-const ENDPOINT = "/ollama/api/chat";
+
+/** AI backend that the user has selected in the Script panel. */
+export type AIBackend = "codex" | "claude";
+
+const BACKEND_ENDPOINTS: Record<AIBackend, string> = {
+  codex: "/ollama/api/chat",
+  claude: "/claude/api/chat",
+};
 
 const SYSTEM_PROMPT = `You write scripts for "Excalidraw Sketsa", a drawing app.
 The script body runs as an async function with two injected objects: \`ea\` and \`utils\`.
@@ -223,6 +230,8 @@ export interface GenerateOptions {
    * model's baked-in Modelfile SYSTEM (see .nudge/learned/testing-excalidraw-ea-...).
    */
   currentScript?: string;
+  /** Which AI backend to use. Defaults to "codex". */
+  backend?: AIBackend;
 }
 
 /** Generate an EA script from a natural-language prompt. Throws on transport/model error. */
@@ -230,6 +239,7 @@ export async function generateScript(
   prompt: string,
   opts: GenerateOptions = {},
 ): Promise<string> {
+  const endpoint = BACKEND_ENDPOINTS[opts.backend ?? "codex"];
   const context = opts.currentScript?.trim();
   const userContent = context
     ? `${prompt}\n\n--- SCRIPT EA SAAT INI (ubah sesuai permintaan di atas, lalu kembalikan SELURUH script lengkap yang bisa dijalankan) ---\n${context}`
@@ -237,7 +247,7 @@ export async function generateScript(
 
   let res: Response;
   try {
-    res = await fetch(ENDPOINT, {
+    res = await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
