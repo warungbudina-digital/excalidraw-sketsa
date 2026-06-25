@@ -1,11 +1,10 @@
 /**
- * Ollama (Qwen) integration — turns a natural-language prompt into an EA script.
+ * AI script generation — turns a natural-language prompt into an EA script.
  *
- * Calls a local Ollama container through the Vite proxy (`/ollama` -> :11434), so the
- * browser request is same-origin (no CORS) and Ollama stays private. The system prompt
- * is an API "cheat sheet" for the EA workbench (see ExcalidrawAutomate.ts) plus a
- * few-shot example — the same idea as the plugin's SuggesterInfo / AI training data, which
- * is what makes a small model produce usable scripts.
+ * Calls the codex backend through the same-origin `/ollama` proxy (nginx/Vite),
+ * so the browser never speaks directly to the AI backend. The system prompt
+ * is an API "cheat sheet" for the EA workbench (see ExcalidrawAutomate.ts) plus
+ * few-shot examples — this is the SINGLE SOURCE OF TRUTH for EA knowledge.
  */
 
 /**
@@ -58,18 +57,60 @@ Excalidraw model (what the elements ARE):
 - frame is a container: child elements set frameId = the frame's id. The colors above don't
   apply to it — give it a name. ea.addFrame handles ids, sizing and ordering for you.
 
-Mermaid (ea.addMermaid) — the EASIEST way to draw diagrams; it does the layout for you:
-- Write a Mermaid FLOWCHART; it becomes real, editable shapes + arrows. Other diagram types
-  (sequence, gantt, class, pie, ...) still work but come back as a static IMAGE, not shapes.
+Mermaid (ea.addMermaid) — auto-layout; PREFER for any diagram that fits:
+- flowchart TD/LR → editable shapes + bound arrows; subgraph → frame. UTAMA.
+- stateDiagram-v2 → state nodes + transition arrows (editable shapes).
+- erDiagram → entity boxes + relationship lines (editable shapes).
+- mindmap → tree hierarchy, each node is a shape (editable shapes).
+- block-beta → block diagram with nested containers (editable shapes).
+- architecture-beta → services in group boundaries + labeled arrows (editable shapes).
+- gantt / pie / journey / gitgraph / sankey / timeline / sequence / xychart →
+  static IMAGE. For these, use the EA manual patterns below instead.
 - Flowchart syntax: first line "flowchart TD" (top-down) or "flowchart LR" (left-right).
   Nodes: A[Rect]  B(Rounded)  C{Diamond/decision}  D((Circle))  E([Stadium]).
   Edges: A --> B (arrow), A --- B (line), A -.-> B (dotted), A ==> B (thick),
          A -->|label| B (labelled). A node id is reused to connect it again.
   Group: "subgraph Title ... end" becomes a frame around those nodes.
 
+EA manual patterns — build these with primitives when Mermaid gives a static image:
+
+Kanban board (frame per column, rect per card):
+ea.setStyle({ backgroundColor: "#d0ebff", strokeColor: "#1971c2", fillStyle: "solid" });
+const t1 = ea.addRect(60, 90, 160, 55, "Task A");
+const t2 = ea.addRect(60, 155, 160, 55, "Task B");
+ea.addFrame("To Do", [t1, t2]);
+// repeat for In Progress, Done with different colors/x positions
+
+C4 / Arsitektur layered (frame boundary + shape per node + connect arrow):
+const user = ea.addEllipse(80, 160, 100, 80, "User");
+const app  = ea.addRect(260, 155, 180, 100, "Aplikasi\n[Web]");
+const ext  = ea.addRect(520, 155, 160, 100, "Payment\n[Ext]");
+ea.connect(user, app, "menggunakan"); ea.connect(app, ext, "API");
+ea.addFrame("System Boundary", [app]);
+
+Quadrant matrix (addLine axes + addText labels + addEllipse per point):
+ea.addLine([[250,450],[250,50]]); ea.addLine([[50,250],[550,250]]);
+ea.addText(260,40,"High Impact"); ea.addText(260,455,"Low Impact");
+ea.addText(50,255,"Low Effort"); ea.addText(450,255,"High Effort");
+ea.setStyle({ backgroundColor: "#a9e34b", fillStyle: "solid" });
+ea.addEllipse(120, 80, 70, 40, "Fitur A");
+
+Timeline horizontal (rect per milestone + connect arrows):
+ea.setStyle({ backgroundColor: "#dbe4ff", strokeColor: "#3b5bdb", fillStyle: "solid" });
+const m1 = ea.addRect(50, 200, 130, 60, "Fase 1\nJan");
+ea.setStyle({ backgroundColor: "#d3f9d8", strokeColor: "#2f9e44", fillStyle: "solid" });
+const m2 = ea.addRect(230, 200, 130, 60, "Fase 2\nFeb-Mar");
+ea.connect(m1, m2); ea.addFrame("Timeline", [m1, m2]);
+
+Gantt chart (rows of rects per task, stacked vertically):
+ea.setStyle({ backgroundColor: "#fff3bf", strokeColor: "#e67700", fillStyle: "solid" });
+ea.addRect(150, 50, 200, 45, "Analisis (W1)");
+ea.setStyle({ backgroundColor: "#d0ebff", strokeColor: "#1971c2", fillStyle: "solid" });
+ea.addRect(150, 105, 350, 45, "Desain (W1-W2)");
+
 Rules:
 - For ANY flowchart/diagram, PREFER: await ea.addMermaid(\`flowchart TD ...\`); it auto-lays
-  out nodes and arrows. Only hand-place shapes if Mermaid can't express it.
+  out nodes and arrows. Use EA manual patterns only when Mermaid gives a static image.
 - When hand-placing, put text inside a shape via its label arg — ea.addRect(x,y,w,h,"Mulai") —
   NOT a separate addText; the label is centered and moves with the box.
 - Connect shapes with ea.connect(a, b) — NOT ea.addArrow with manual points; the arrow binds to
@@ -103,6 +144,69 @@ ea.connect(a, b);
 ea.connect(b, c);
 ea.addFrame("Alur Proses", [a, b, c]);
 await ea.addElementsToView();`;
+
+// ---------------------------------------------------------------------------
+// Prompt presets — keyword-triggered templates shown as chips in the UI.
+// Clicking a chip pre-fills the AI input so the user can send or tweak it.
+// ---------------------------------------------------------------------------
+
+export interface PromptPreset {
+  label: string;
+  prompt: string;
+}
+
+export const PROMPT_PRESETS: PromptPreset[] = [
+  {
+    label: "Flowchart",
+    prompt:
+      "Buat flowchart proses checkout: Pilih produk → Tambah ke keranjang → Pembayaran, jika berhasil → Konfirmasi pesanan, jika gagal → Ulangi pembayaran",
+  },
+  {
+    label: "State Diagram",
+    prompt:
+      "Buat state diagram status pesanan online: Dibuat → Dibayar → Diproses → Dikirim → Selesai. Bisa Dibatalkan dari status Dibuat atau Dibayar",
+  },
+  {
+    label: "ER Diagram",
+    prompt:
+      "Buat ER diagram toko online: Customer (id, nama, email) punya banyak Order (id, tanggal, total), satu Order berisi banyak Product (id, nama, harga, stok)",
+  },
+  {
+    label: "Mind Map",
+    prompt:
+      "Buat mind map Pengembangan Web: cabang Frontend (HTML, CSS, React), Backend (Node.js, REST API, Database), DevOps (Docker, CI/CD, Cloud). Tiap cabang punya 3 sub-topik",
+  },
+  {
+    label: "Arsitektur",
+    prompt:
+      "Buat diagram arsitektur jaringan: Internet → Cloudflare CDN → Load Balancer → 2 Web Server → PostgreSQL Database. Tambahkan Redis Cache antara server dan database",
+  },
+  {
+    label: "Kanban",
+    prompt:
+      "Buat kanban board 3 kolom: To Do (5 task), In Progress (2 task), Done (3 task). Gunakan warna berbeda per kolom dan bungkus tiap kolom dalam frame berlabel",
+  },
+  {
+    label: "C4 Context",
+    prompt:
+      "Buat C4 context diagram: User menggunakan Aplikasi Web, Aplikasi memanggil Codex AI untuk generate script dan Cloudflare Tunnel untuk akses publik. Beri frame System Boundary",
+  },
+  {
+    label: "Kuadran",
+    prompt:
+      "Buat quadrant matrix prioritas: sumbu X=Effort (Low→High), Y=Impact (Low→High). Plot 5 fitur: Login SSO, Dashboard Analytics, Export PDF, Dark Mode, Mobile App",
+  },
+  {
+    label: "Timeline",
+    prompt:
+      "Buat timeline horizontal proyek 6 bulan: Riset & Analisis (Jan), Desain UI (Feb-Mar), Pengembangan (Apr-Mei), Launch & Monitoring (Jun). Warna berbeda per fase, bungkus dalam frame",
+  },
+  {
+    label: "Gantt",
+    prompt:
+      "Buat gantt chart 4 minggu: Analisis Kebutuhan (W1), Desain UI/UX (W1-W2), Backend (W2-W3), Frontend (W2-W3), Testing (W3-W4), Deploy (W4). Bar warna berbeda per task",
+  },
+];
 
 /** Remove a surrounding markdown code fence if the model added one. */
 function stripCodeFences(text: string): string {

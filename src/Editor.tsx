@@ -5,7 +5,7 @@ import { curateAppState, serializeScene } from "./io/serialize";
 import { parseScene } from "./io/parse";
 import { ExcalidrawAutomate } from "./automate/ExcalidrawAutomate";
 import { createDefaultUtils, runScript } from "./automate/scriptRunner";
-import { generateScript, OLLAMA_MODEL } from "./ai/ollama";
+import { generateScript, OLLAMA_MODEL, PROMPT_PRESETS } from "./ai/ollama";
 import { COMPANY_NAME } from "./auth/auth";
 import { sceneToEAScript } from "./scene-code/decompile";
 import {
@@ -551,10 +551,22 @@ export default function Editor({ onLogout }: { onLogout: () => void }) {
               <button onClick={doRunScript}>► Jalankan</button>
             </span>
           </div>
+          <div className="preset-row">
+            {PROMPT_PRESETS.map((preset) => (
+              <button
+                key={preset.label}
+                className="preset-chip"
+                onClick={() => setAiPrompt(preset.prompt)}
+                title={preset.prompt}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
           <div className="ai-row">
             <input
               className="ai-input"
-              placeholder={`Minta ${OLLAMA_MODEL} membuat script… (mis. "flowchart 3 kotak")`}
+              placeholder={`Minta ${OLLAMA_MODEL} membuat script… atau pilih template di atas`}
               value={aiPrompt}
               disabled={aiBusy}
               onChange={(e) => setAiPrompt(e.target.value)}

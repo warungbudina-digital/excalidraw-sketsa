@@ -145,10 +145,43 @@
   cursor: default;
 }
 
+.preset-row {
+  display: flex;
+  gap: 6px;
+  padding: 6px 12px 4px;
+  background: #252525;
+  overflow-x: auto;
+  scrollbar-width: none;
+  flex-wrap: nowrap;
+}
+
+.preset-row::-webkit-scrollbar {
+  display: none;
+}
+
+.preset-chip {
+  flex: 0 0 auto;
+  padding: 3px 10px;
+  border: 1px solid #444;
+  border-radius: 12px;
+  background: #2e2e2e;
+  color: #ccc;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.preset-chip:hover {
+  background: #3d3d3d;
+  border-color: #7048e8;
+  color: #d0bfff;
+}
+
 .ai-row {
   display: flex;
   gap: 8px;
-  padding: 8px 12px;
+  padding: 4px 12px 8px;
   background: #252525;
   border-bottom: 1px solid #333;
 }
