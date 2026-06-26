@@ -103,6 +103,7 @@ export default function Editor({ onLogout }: { onLogout: () => void }) {
   const [aiBusy, setAiBusy] = useState(false);
   const [showMemory, setShowMemory] = useState(false);
   const [memoryList, setMemoryList] = useState<MemorySummary[]>([]);
+  const [memoryQuery, setMemoryQuery] = useState("");
   const [memoryBusy, setMemoryBusy] = useState(false);
   const [sceneCodeBusy, setSceneCodeBusy] = useState(false);
   const [apiReady, setApiReady] = useState(false);
@@ -457,16 +458,19 @@ export default function Editor({ onLogout }: { onLogout: () => void }) {
     }
   }, [aiPrompt, aiBusy, scriptCode, flash]);
 
-  const loadMemoryList = useCallback(async () => {
-    setMemoryBusy(true);
-    try {
-      setMemoryList(await listMemory({ limit: 50 }));
-    } catch (e) {
-      flash(`Riwayat gagal — ${(e as Error).message}`);
-    } finally {
-      setMemoryBusy(false);
-    }
-  }, [flash]);
+  const loadMemoryList = useCallback(
+    async (q?: string) => {
+      setMemoryBusy(true);
+      try {
+        setMemoryList(await listMemory({ limit: 50, q }));
+      } catch (e) {
+        flash(`Riwayat gagal — ${(e as Error).message}`);
+      } finally {
+        setMemoryBusy(false);
+      }
+    },
+    [flash],
+  );
 
   const toggleMemory = useCallback(() => {
     setShowMemory((open) => {
@@ -646,14 +650,48 @@ export default function Editor({ onLogout }: { onLogout: () => void }) {
             <div className="memory-panel">
               <div className="memory-head">
                 <span>Riwayat AI ({memoryList.length})</span>
-                <button onClick={() => void loadMemoryList()} disabled={memoryBusy}>
+                <button onClick={() => void loadMemoryList(memoryQuery)} disabled={memoryBusy}>
                   {memoryBusy ? "…" : "⟳ Muat ulang"}
+                </button>
+              </div>
+              <div className="memory-search">
+                <input
+                  className="memory-search-input"
+                  placeholder="Cari prompt…"
+                  value={memoryQuery}
+                  disabled={memoryBusy}
+                  onChange={(e) => setMemoryQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void loadMemoryList(memoryQuery);
+                  }}
+                />
+                {memoryQuery && (
+                  <button
+                    className="memory-search-clear"
+                    onClick={() => {
+                      setMemoryQuery("");
+                      void loadMemoryList();
+                    }}
+                    disabled={memoryBusy}
+                    title="Hapus pencarian"
+                  >
+                    ✕
+                  </button>
+                )}
+                <button
+                  className="memory-search-btn"
+                  onClick={() => void loadMemoryList(memoryQuery)}
+                  disabled={memoryBusy}
+                >
+                  Cari
                 </button>
               </div>
               <div className="memory-list">
                 {memoryList.length === 0 && !memoryBusy && (
                   <div className="memory-empty">
-                    Belum ada riwayat — atau Supabase belum dikonfigurasi.
+                    {memoryQuery
+                      ? `Tidak ada hasil untuk "${memoryQuery}".`
+                      : "Belum ada riwayat — atau Supabase belum dikonfigurasi."}
                   </div>
                 )}
                 {memoryList.map((m) => (
