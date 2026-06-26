@@ -123,6 +123,30 @@ ea.addRect(150, 50, 200, 45, "Analisis (W1)");
 ea.setStyle({ backgroundColor: "#d0ebff", strokeColor: "#1971c2", fillStyle: "solid" });
 ea.addRect(150, 105, 350, 45, "Desain (W1-W2)");
 
+Denah / Floor plan (denah ruangan/bangunan: rumah, kamar, sekolah, RS, restoran, hotel):
+Skala konsisten ~1 meter = 40 px; centerkan layout; JANGAN tumpang tindih; beri label tiap ruang.
+- Ruang/kamar = ea.addRect(x,y,w,h,"Nama Ruang") bersebelahan berbagi dinding (lantai = dinding kotak).
+  Dinding tak-kotak / outline bangunan = ea.addLine([[x,y],...]) poligon tertutup (garis EA tak terisi).
+- Pintu = sisakan CELAH ~30px pada dinding, atau ea.addLine pendek sebagai daun pintu.
+- Lantai berwarna: ea.setStyle({ backgroundColor:"#f1f3f5", fillStyle:"solid" }) untuk dalam ruang;
+  teras/teak #f5e6c8, taman #d3f9d8, air/kolam #a5d8ff, area teknis #ced4da, dinding strokeColor #1e1e1e.
+- Furnitur — rakit dari primitif, posisi = pojok kiri-atas (x,y):
+  ea.setStyle({ strokeColor:"#1e1e1e", backgroundColor:"#ffffff", fillStyle:"solid" });
+  Kasur:  const b=ea.addRect(x,y,140,200,"Bed"); ea.addRect(x+12,y+10,116,34);   // bantal
+  Sofa:   ea.addRect(x,y,180,70,"Sofa"); ea.addLine([[x,y],[x+180,y]]);          // sandaran
+  Meja bulat+kursi (dining/resto): const t=ea.addEllipse(x,y,90,90);
+          ea.addEllipse(x-26,y+30,26,26); ea.addEllipse(x+90,y+30,26,26); ea.addEllipse(x+32,y-26,26,26);
+  Meja+2 kursi (kafe): ea.addRect(x,y,70,70); ea.addEllipse(x-26,y+22,24,24); ea.addEllipse(x+72,y+22,24,24);
+  Wastafel/kloset (toilet): ea.addEllipse(x,y,42,30); ea.addRect(x+60,y,40,55);
+  Meja kerja/resepsionis: ea.addRect(x,y,160,55,"Meja");
+  Tangga: for (let i=0;i<7;i++) ea.addLine([[x,y+i*14],[x+90,y+i*14]]);
+  Kolam/pool: ea.setStyle({ backgroundColor:"#a5d8ff", fillStyle:"solid" }); ea.addEllipse(x,y,220,100,"Pool");
+- Koridor = ruang panjang-sempit; deret kamar di KEDUA sisi (gunakan simetri: cermin y thd sumbu koridor).
+- Bangunan publik (sekolah/RS/hotel): koridor pusat + ruang/kamar berderet berlabel ("Kelas 1A", "Ruang 201",
+  "Kamar 305", "ICU", "Lab"); bungkus tiap lantai/sayap dengan ea.addFrame("Lantai 1", [ids]).
+- Penggaris dimensi (opsional, gaya teknis GA): base=ea.addLine([[x0,Y],[x1,Y]]);
+  tiap langkah ea.addLine([[x,Y],[x,Y-8]]) + ea.addText(x-4,Y+6,String(n)).
+
 Rules:
 - For SIMPLE flowcharts/diagrams, PREFER: await ea.addMermaid(\`flowchart TD ...\`); it auto-lays
   out nodes and arrows. Keep labels short & single-line (NO <br>) and subgraphs ≤1 level deep —
@@ -224,6 +248,36 @@ export const PROMPT_PRESETS: PromptPreset[] = [
     label: "Gantt",
     prompt:
       "Buat gantt chart 4 minggu: Analisis Kebutuhan (W1), Desain UI/UX (W1-W2), Backend (W2-W3), Frontend (W2-W3), Testing (W3-W4), Deploy (W4). Bar warna berbeda per task",
+  },
+  {
+    label: "Denah Rumah",
+    prompt:
+      "Buat denah rumah 1 lantai tampak atas: ruang tamu, dapur, 2 kamar tidur (masing-masing dengan kasur + lemari), 1 kamar mandi (kloset + wastafel), dan teras depan. Ruang berbagi dinding, beri label tiap ruang, lengkapi furnitur, skala konsisten",
+  },
+  {
+    label: "Denah Kamar",
+    prompt:
+      "Buat denah kamar tidur tampak atas: kasur double + 2 bantal, lemari pakaian, meja kerja + kursi, dan kamar mandi dalam (kloset + wastafel + shower). Beri pintu (celah pada dinding) dan label tiap furnitur",
+  },
+  {
+    label: "Denah Sekolah",
+    prompt:
+      "Buat denah lantai 1 gedung sekolah tampak atas: koridor pusat memanjang, 6 ruang kelas berderet di kedua sisi (Kelas 1A–3B, tiap kelas berisi deretan meja-kursi), 1 ruang guru, 1 perpustakaan, 1 toilet. Bungkus dalam frame 'Lantai 1'",
+  },
+  {
+    label: "Denah RS",
+    prompt:
+      "Buat denah lantai rumah sakit tampak atas: koridor pusat, nurse station di tengah, 6 kamar rawat inap berderet (tiap kamar 1 ranjang pasien + meja), ruang ICU, ruang operasi, ruang tunggu, dan toilet. Beri label tiap ruang",
+  },
+  {
+    label: "Denah Restoran",
+    prompt:
+      "Buat denah restoran tampak atas: area makan dengan 8 meja (campuran meja bulat 4 kursi dan meja kotak 2 kursi), dapur dengan kompor + meja persiapan, bar/kasir, toilet, dan pintu masuk. Beri label area dan jaga jarak antar meja",
+  },
+  {
+    label: "Denah Hotel",
+    prompt:
+      "Buat denah lantai hotel tampak atas: lobi dengan meja resepsionis + sofa, koridor pusat, 8 kamar tamu berderet simetris di kedua sisi (tiap kamar: kasur + kamar mandi dalam), lift, dan tangga darurat. Beri nomor kamar dan bungkus dalam frame",
   },
 ];
 
