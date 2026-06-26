@@ -7,7 +7,15 @@ Node mirroring `deploy/collab/`. It captures each AI generation turn (prompt + r
 `/memory/*`; inside it calls Supabase REST with the SERVICE key (server-side only — the
 browser never gets it, same posture as codex/claude auth + ai-proxy key).
 
-- Endpoints: `POST /memory` (insert), `GET /memory?limit&q` (recent/search), `GET /healthz`.
+- Endpoints (container-internal): `POST /memory` (insert), `GET /memory?limit&q`
+  (recent list — SUMMARY fields only, NO `response`/`scene_snapshot`, kept small),
+  `GET /memory/<uuid>` (ONE full row incl. `response` + `scene_snapshot`), `GET /healthz`.
+- BROWSER path doubles the segment: nginx `location /memory/` rewrites `^/memory/(.*)$`
+  -> `/$1`, so the client calls `/memory/memory` (list/insert), `/memory/memory/<id>`
+  (detail), `/memory/healthz`. See the `BASE = "/memory/memory"` const in `src/ai/memory.ts`.
+- Read client is `src/ai/memory.ts` (`listMemory`/`getMemory`); the "Riwayat" panel in
+  `src/Editor.tsx` lists turns and reloads a turn's `response` into the editor. The
+  list/detail field split means the panel needs getMemory(id) to get the actual script.
 - Capture is fired from `src/ai/ollama.ts` `captureMemory()` — fire-and-forget,
   `.catch(()=>{})`, NEVER awaited: a capture failure must not block/break generation.
 - nginx `/memory/` route is deliberately NOT rate-limited (the ai_gen limit_req zone is
