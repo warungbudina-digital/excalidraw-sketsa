@@ -302,7 +302,8 @@ export class ExcalidrawAutomate {
    *
    * Only **flowcharts** become real, editable shapes + arrows (subgraphs become frames);
    * every other diagram type comes back as a single static **image** (added via files).
-   * Returns the ids of the created elements.
+   * Returns the ids of the created elements. THROWS if a flowchart is too complex to convert
+   * and degrades to a flat image — so the caller fails loudly instead of getting junk.
    *
    * Async and browser-only — Mermaid renders through the DOM. Usage:
    * `await ea.addMermaid("flowchart TD\n A[Mulai] --> B{OK?}");`
@@ -323,6 +324,24 @@ export class ExcalidrawAutomate {
     const converted = convertToExcalidrawElements(result.elements as never, {
       regenerateIds: true,
     }) as unknown as SceneElement[];
+
+    // Hard guarantee: a FLOWCHART must become editable shapes. When the diagram is too complex
+    // (deeply nested subgraphs, <br>/HTML labels), parseMermaidToExcalidraw silently falls back
+    // to ONE flat image — not editable, and Scene → Code can only dump it as an opaque payload.
+    // Refuse it loudly so the script fails with an actionable message instead of producing junk.
+    // (Static-image diagram types — gantt/pie/sequence/… — return an image BY DESIGN, so only
+    // guard flowchart/graph definitions, where an image means the conversion failed.)
+    const firstLine = definition.trim().split("\n", 1)[0]?.trim().toLowerCase() ?? "";
+    const isFlowchart = firstLine.startsWith("flowchart") || firstLine.startsWith("graph");
+    const onlyImages = converted.length > 0 && converted.every((el) => el.type === "image");
+    if (isFlowchart && onlyImages) {
+      throw new Error(
+        "Mermaid flowchart terlalu kompleks — gagal dikonversi ke shape dan jadi gambar datar " +
+          "(tak bisa diedit / di-Scene→Code). Sederhanakan: label pendek 1 baris (tanpa <br>/HTML), " +
+          "subgraph maks 1 level; atau bangun dari primitif (addRect/connect/addFrame).",
+      );
+    }
+
     this.prebuilt.push(...converted);
     if (result.files) {
       Object.assign(this.pendingFiles, result.files);
