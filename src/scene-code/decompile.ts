@@ -62,11 +62,13 @@ export function sceneToEAScript(scene: SerializableScene): string {
   const shapesText: SceneElement[] = [];
   const arrows: SceneElement[] = [];
   const frames: SceneElement[] = [];
-  const raw: SceneElement[] = [];
+  // Each raw element carries WHY it couldn't be emitted readably, so the output can
+  // explain the payload to the user instead of dumping an opaque blob.
+  const raw: { el: SceneElement; reason: string }[] = [];
   for (const el of elements) {
     if (foldedTextIds.has(el.id)) continue;
     if (!isReadable(el)) {
-      raw.push(el);
+      raw.push({ el, reason: SUPPORTED.has(el.type) ? "dirotasi (angle≠0)" : "tipe tanpa builder EA" });
     } else if (el.type === "arrow") {
       arrows.push(el);
     } else if (el.type === "frame") {
@@ -148,7 +150,7 @@ export function sceneToEAScript(scene: SerializableScene): string {
     if (el.type === "line") {
       const points = absolutePoints(el);
       if (!points) {
-        raw.push(el);
+        raw.push({ el, reason: "garis tanpa titik valid" });
         continue;
       }
       emitStyle(shapeStyle(el));
@@ -191,7 +193,7 @@ export function sceneToEAScript(scene: SerializableScene): string {
     }
     const points = absolutePoints(el);
     if (!points) {
-      raw.push(el);
+      raw.push({ el, reason: "panah tanpa binding & titik valid" });
       continue;
     }
     emitStyle(shapeStyle(el));
@@ -221,7 +223,7 @@ export function sceneToEAScript(scene: SerializableScene): string {
       .filter((child) => str(child.frameId) === el.id && varOf.has(child.id))
       .map((child) => varOf.get(child.id) as string);
     if (childVars.length === 0) {
-      raw.push(el);
+      raw.push({ el, reason: "frame tanpa anak ter-emit" });
       continue;
     }
     lines.push(`ea.addFrame(${lit(str(el.name) ?? "Frame")}, [${childVars.join(", ")}]);`);
@@ -230,7 +232,7 @@ export function sceneToEAScript(scene: SerializableScene): string {
   // --- everything EA can't express: emitted verbatim, with its files ---
   if (raw.length > 0) {
     const files: SceneFiles = {};
-    const cleaned = raw.map((el) => {
+    const cleaned = raw.map(({ el }) => {
       const copy = { ...el } as SceneElement;
       // Its frame (if any) was rebuilt with a fresh id, so this reference can't survive; drop
       // it rather than leave a dangling link. The element still renders, just unframed.
@@ -240,7 +242,32 @@ export function sceneToEAScript(scene: SerializableScene): string {
       return copy;
     });
     const filesArg = Object.keys(files).length > 0 ? `, ${lit(files)}` : "";
-    lines.push("// Elemen di luar cakupan EA (image/freedraw/dll) — disisipkan apa adanya agar presisi:");
+
+    // Diagnostic breakdown: "<count> <type> (<reason>)" per distinct type+reason, so the
+    // user can SEE what became payload and why — instead of staring at an opaque blob.
+    const breakdown = new Map<string, number>();
+    for (const { el, reason } of raw) {
+      const key = `${el.type}::${reason}`;
+      breakdown.set(key, (breakdown.get(key) ?? 0) + 1);
+    }
+    lines.push(
+      `// ⚠ ${raw.length} elemen di luar cakupan EA — disisipkan apa adanya (payload, sulit diedit):`,
+    );
+    for (const [key, count] of breakdown) {
+      const [type, reason] = key.split("::");
+      lines.push(`//   • ${count}× ${type} — ${reason}`);
+    }
+    // image/freedraw are pixels: NO decompiler can turn them into editable shapes. The only
+    // way to get an editable Scene→Code is to build the diagram from EA primitives upstream.
+    if (raw.some(({ el }) => el.type === "image" || el.type === "freedraw")) {
+      lines.push(
+        "//   → image/freedraw = piksel, tak bisa jadi shape editable. Untuk diagram yang bisa diedit,",
+      );
+      lines.push(
+        "//     minta AI membangun dgn primitif (addRect/connect/addFrame) & hindari Mermaid gambar-statis",
+      );
+      lines.push("//     (gantt/pie/sequence/journey/gitgraph/sankey/timeline/xychart).");
+    }
     lines.push(`ea.addRawElements(${lit(cleaned)}${filesArg});`);
   }
 
