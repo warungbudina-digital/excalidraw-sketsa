@@ -278,5 +278,25 @@ export async function generateScript(
   if (!content.trim()) {
     throw new Error("Respons Ollama kosong");
   }
-  return stripCodeFences(content);
+  const script = stripCodeFences(content);
+  captureMemory(opts.backend ?? "codex", userContent, script);
+  return script;
+}
+
+/**
+ * Best-effort persistence of a generation turn to the memory backend (Supabase-backed).
+ * Fire-and-forget: never awaited, errors swallowed — capture must not block or break
+ * generation. The Supabase service key stays server-side in the memory container; the
+ * browser only ever calls the same-origin /memory/ proxy (no secret in the bundle).
+ */
+function captureMemory(backend: AIBackend, prompt: string, response: string): void {
+  try {
+    void fetch("/memory/memory", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ backend, model: OLLAMA_MODEL, prompt, response, meta: { valid: true } }),
+    }).catch(() => {});
+  } catch {
+    /* capture is optional — ignore */
+  }
 }

@@ -127,4 +127,18 @@ server {
         proxy_read_timeout 600s;
         proxy_send_timeout 600s;
     }
+
+    # AI memory capture/list — private memory container (Supabase-backed). NOT rate
+    # limited: capture is best-effort and must never be rejected with 429.
+    location /memory/ {
+        set $memory_upstream ${MEMORY_HOST};
+        rewrite ^/memory/(.*)$ /$1 break;
+        proxy_pass http://$memory_upstream;
+
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_buffering off;
+        proxy_read_timeout 30s;
+        proxy_send_timeout 30s;
+    }
 }

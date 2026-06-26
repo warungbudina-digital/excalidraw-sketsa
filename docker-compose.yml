@@ -36,6 +36,8 @@ services:
       CLAUDE_HOST: ${CLAUDE_UPSTREAM:-claude:8083}
       # Upstream nginx forwards /agy/* to (the Antigravity CLI backend shim).
       AGY_HOST: ${AGY_UPSTREAM:-agy:8084}
+      # Upstream nginx forwards /memory/* to (the AI memory capture shim, Supabase-backed).
+      MEMORY_HOST: ${MEMORY_UPSTREAM:-memory:8085}
       TZ: ${TZ:-Asia/Jakarta}
     ports:
       # Host:container. For Cloud Shell use Web Preview on 8080. If you only access the app
@@ -175,6 +177,35 @@ services:
       timeout: 5s
       retries: 3
       start_period: 15s
+    restart: unless-stopped
+
+  # AI memory: captures each AI generation turn (prompt + response + scene) to Supabase
+  # (Postgres via PostgREST). Private, like collab — reached only by nginx (/memory/*).
+  # No volume: Supabase IS the store. The service key stays server-side (never in browser).
+  # A keep-alive ping inside server.js (default every 3 days) stops the free-tier project
+  # from auto-pausing. If SUPABASE_* are unset, the container still boots and degrades
+  # (capture returns 503) — it never blocks the app.
+  memory:
+    build:
+      context: ./deploy/memory
+      dockerfile: Dockerfile
+    image: excalidraw-sketsa-memory:latest
+    environment:
+      PORT: 8085
+      # Base project URL ONLY (server.js appends /rest/v1/). Empty = capture disabled (503).
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      # service/secret key — server-side only, never reaches the browser.
+      SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_KEY:-}
+      # Keep-alive cadence (default 3 days, under Supabase's ~7-day idle pause).
+      MEMORY_PING_INTERVAL_MS: ${MEMORY_PING_INTERVAL_MS:-259200000}
+      TZ: ${TZ:-Asia/Jakarta}
+    # No `ports:` — reached only by nginx over the compose network (/memory/* -> memory:8085).
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8085/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
     restart: unless-stopped
 
   cloudflared:
