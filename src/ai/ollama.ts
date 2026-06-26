@@ -40,7 +40,10 @@ ea.connect(fromId, toId, label?) -> id  // arrow BOUND to two shapes (ids from a
 ea.addToGroup(ids) -> groupId
 ea.addFrame(name, childIds) -> frameId   // wraps childIds in a named frame, auto-sized
 await ea.addMermaid(definition) -> ids[]  // render a Mermaid diagram (auto layout). PREFER
-                                          // this for any flowchart/diagram.
+  // this for SIMPLE flowcharts/diagrams. WARNING: a flowchart that is too complex — deeply
+  // nested subgraphs or <br>/HTML in labels — FAILS to convert and falls back to ONE flat
+  // image: not editable, and "Scene → Code" can only dump it as an opaque payload. Keep
+  // flowcharts simple, or build big/complex ones from primitives so they stay editable shapes.
 ea.addRawElements(elements, files?) -> ids[]  // insert raw Excalidraw elements verbatim. "Scene →
   // Code" emits this for shapes it can't rebuild (image/freedraw). KEEP such blocks intact when editing.
 await ea.clearView()  // wipe the canvas. "Scene → Code" puts this first so re-running REPLACES the scene
@@ -78,7 +81,11 @@ Mermaid (ea.addMermaid) — auto-layout; PREFER for any diagram that fits:
   Nodes: A[Rect]  B(Rounded)  C{Diamond/decision}  D((Circle))  E([Stadium]).
   Edges: A --> B (arrow), A --- B (line), A -.-> B (dotted), A ==> B (thick),
          A -->|label| B (labelled). A node id is reused to connect it again.
-  Group: "subgraph Title ... end" becomes a frame around those nodes.
+  Group: "subgraph Title ... end" becomes a frame around those nodes — MAX 1 level deep.
+  KEEP IT CONVERTIBLE (else it silently becomes one flat image): node labels SHORT & single-
+  line — NO <br>, NO HTML tags; do NOT nest a subgraph inside another subgraph. If the diagram
+  needs more than ~15 nodes or nested groups, do NOT use Mermaid — build it from EA primitives
+  (addRect/connect/addFrame) so it stays editable shapes that Scene → Code can decompile.
 
 EA manual patterns — build these with primitives when Mermaid gives a static image:
 
@@ -117,8 +124,12 @@ ea.setStyle({ backgroundColor: "#d0ebff", strokeColor: "#1971c2", fillStyle: "so
 ea.addRect(150, 105, 350, 45, "Desain (W1-W2)");
 
 Rules:
-- For ANY flowchart/diagram, PREFER: await ea.addMermaid(\`flowchart TD ...\`); it auto-lays
-  out nodes and arrows. Use EA manual patterns only when Mermaid gives a static image.
+- For SIMPLE flowcharts/diagrams, PREFER: await ea.addMermaid(\`flowchart TD ...\`); it auto-lays
+  out nodes and arrows. Keep labels short & single-line (NO <br>) and subgraphs ≤1 level deep —
+  a too-complex flowchart silently becomes ONE flat image (not editable, can't be decompiled by
+  Scene → Code). For LARGE/complex diagrams (>~15 nodes, nested groups, or full architecture),
+  build from EA primitives (addRect/connect/addFrame + addFrame for boundaries) INSTEAD of
+  Mermaid. Use EA manual patterns also when Mermaid gives a static image.
 - When hand-placing, put text inside a shape via its label arg — ea.addRect(x,y,w,h,"Mulai") —
   NOT a separate addText; the label is centered and moves with the box.
 - Connect shapes with ea.connect(a, b) — NOT ea.addArrow with manual points; the arrow binds to
