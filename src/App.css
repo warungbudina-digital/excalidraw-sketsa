@@ -88,6 +88,45 @@
   }
 }
 
+/* Collapsed feature bar: removed from layout so the canvas takes the full height —
+   a clean surface for stylus drawing. Toggled by the floating pin button below. */
+.toolbar.toolbar-collapsed {
+  display: none;
+}
+
+/* Floating pin button (FAB) — single control to hide/show the feature bar. Fixed at the
+   bottom-right so it stays reachable in fullscreen and doesn't move with the page. 48px is
+   a comfortable touch/stylus target. */
+.toolbar-fab {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 1000;
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background: #7048e8;
+  color: #fff;
+  font-size: 20px;
+  line-height: 1;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.toolbar-fab:hover {
+  background: #5f3dc4;
+}
+
+.toolbar-fab:active {
+  transform: scale(0.94);
+}
+
 .toolbar .logout {
   border-color: #ffc9c9;
   color: #e03131;

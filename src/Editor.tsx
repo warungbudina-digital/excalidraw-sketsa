@@ -97,6 +97,9 @@ export default function Editor({ onLogout }: { onLogout: () => void }) {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [zoomLocked, setZoomLocked] = useState(false);
   const [showScript, setShowScript] = useState(false);
+  // Collapsible top toolbar — on small screens / stylus use, hide the feature bar so the
+  // canvas is unobstructed; one floating button (FAB) toggles it back when tools are needed.
+  const [toolbarOpen, setToolbarOpen] = useState(true);
   const [scriptCode, setScriptCode] = useState(SAMPLE_SCRIPT);
   const [aiBackend, setAiBackend] = useState<AIBackend>("codex");
   const [aiPrompt, setAiPrompt] = useState("");
@@ -517,7 +520,7 @@ export default function Editor({ onLogout }: { onLogout: () => void }) {
 
   return (
     <div className="app" ref={appRef}>
-      <header className="toolbar">
+      <header className={`toolbar${toolbarOpen ? "" : " toolbar-collapsed"}`}>
         <span className="brand">{COMPANY_NAME}</span>
         <button onClick={save}>Simpan</button>
         <button
@@ -744,6 +747,20 @@ export default function Editor({ onLogout }: { onLogout: () => void }) {
             </div>
           )}
         </div>
+      )}
+
+      {/* Pin button: collapses/expands the top feature bar so the canvas stays clean for
+          stylus drawing. Hidden while the Script panel is open (that is a coding surface,
+          not a drawing one, and the panel would otherwise overlap the button). */}
+      {!showScript && (
+        <button
+          className="toolbar-fab"
+          onClick={() => setToolbarOpen((open) => !open)}
+          title={toolbarOpen ? "Sembunyikan menu — rapikan layar" : "Tampilkan menu & tools"}
+          aria-label={toolbarOpen ? "Sembunyikan menu" : "Tampilkan menu"}
+        >
+          {toolbarOpen ? "✕" : "☰"}
+        </button>
       )}
     </div>
   );
