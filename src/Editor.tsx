@@ -6,6 +6,7 @@ import { parseScene } from "./io/parse";
 import { ExcalidrawAutomate } from "./automate/ExcalidrawAutomate";
 import { createDefaultUtils, runScript } from "./automate/scriptRunner";
 import { generateScript, OLLAMA_MODEL, PROMPT_PRESETS, type AIBackend } from "./ai/ollama";
+import { listMemory, getMemory, type MemorySummary } from "./ai/memory";
 import { COMPANY_NAME } from "./auth/auth";
 import { sceneToEAScript } from "./scene-code/decompile";
 import {
@@ -100,6 +101,9 @@ export default function Editor({ onLogout }: { onLogout: () => void }) {
   const [aiBackend, setAiBackend] = useState<AIBackend>("codex");
   const [aiPrompt, setAiPrompt] = useState("");
   const [aiBusy, setAiBusy] = useState(false);
+  const [showMemory, setShowMemory] = useState(false);
+  const [memoryList, setMemoryList] = useState<MemorySummary[]>([]);
+  const [memoryBusy, setMemoryBusy] = useState(false);
   const [sceneCodeBusy, setSceneCodeBusy] = useState(false);
   const [apiReady, setApiReady] = useState(false);
   const [collaborationRoom, setCollaborationRoom] = useState(getRoomFromUrl);
@@ -453,6 +457,41 @@ export default function Editor({ onLogout }: { onLogout: () => void }) {
     }
   }, [aiPrompt, aiBusy, scriptCode, flash]);
 
+  const loadMemoryList = useCallback(async () => {
+    setMemoryBusy(true);
+    try {
+      setMemoryList(await listMemory({ limit: 50 }));
+    } catch (e) {
+      flash(`Riwayat gagal — ${(e as Error).message}`);
+    } finally {
+      setMemoryBusy(false);
+    }
+  }, [flash]);
+
+  const toggleMemory = useCallback(() => {
+    setShowMemory((open) => {
+      if (!open) void loadMemoryList();
+      return !open;
+    });
+  }, [loadMemoryList]);
+
+  const loadMemoryItem = useCallback(
+    async (id: string) => {
+      setMemoryBusy(true);
+      try {
+        const item = await getMemory(id);
+        setScriptCode(item.response);
+        setShowMemory(false);
+        flash("Script dari riwayat dimuat — tinjau lalu ► Jalankan");
+      } catch (e) {
+        flash(`Muat riwayat gagal — ${(e as Error).message}`);
+      } finally {
+        setMemoryBusy(false);
+      }
+    },
+    [flash],
+  );
+
   const generateCurrentSceneCode = useCallback(() => {
     if (sceneCodeBusy) return;
     const scene = currentScene();
@@ -544,6 +583,14 @@ export default function Editor({ onLogout }: { onLogout: () => void }) {
             <strong>Script (Excalidraw Automate)</strong>
             <span className="script-panel-actions">
               <button
+                className={`memory-btn${showMemory ? " active" : ""}`}
+                onClick={toggleMemory}
+                disabled={memoryBusy}
+                title="Riwayat hasil generate AI (tersimpan di Supabase)"
+              >
+                {showMemory ? "Tutup Riwayat" : "Riwayat"}
+              </button>
+              <button
                 className="scene-code-btn"
                 onClick={() => void generateCurrentSceneCode()}
                 disabled={sceneCodeBusy}
@@ -595,6 +642,38 @@ export default function Editor({ onLogout }: { onLogout: () => void }) {
               {aiBusy ? "…" : "✨ Generate"}
             </button>
           </div>
+          {showMemory && (
+            <div className="memory-panel">
+              <div className="memory-head">
+                <span>Riwayat AI ({memoryList.length})</span>
+                <button onClick={() => void loadMemoryList()} disabled={memoryBusy}>
+                  {memoryBusy ? "…" : "⟳ Muat ulang"}
+                </button>
+              </div>
+              <div className="memory-list">
+                {memoryList.length === 0 && !memoryBusy && (
+                  <div className="memory-empty">
+                    Belum ada riwayat — atau Supabase belum dikonfigurasi.
+                  </div>
+                )}
+                {memoryList.map((m) => (
+                  <button
+                    key={m.id}
+                    className="memory-item"
+                    onClick={() => void loadMemoryItem(m.id)}
+                    disabled={memoryBusy}
+                    title={m.prompt}
+                  >
+                    <span className="memory-item-backend">{m.backend}</span>
+                    <span className="memory-item-prompt">{m.prompt}</span>
+                    <span className="memory-item-time">
+                      {new Date(m.created_at).toLocaleString()}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <textarea
             value={scriptCode}
             spellCheck={false}

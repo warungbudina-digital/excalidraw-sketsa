@@ -147,6 +147,26 @@ async function handleList(res, url) {
   }
 }
 
+async function handleDetail(res, id) {
+  if (!configured) return sendJson(res, 503, { error: "Supabase tidak dikonfigurasi" });
+  if (!/^[0-9a-f-]{36}$/i.test(id)) return sendJson(res, 400, { error: "id tidak valid" });
+  // Full row including response + scene_snapshot (the list endpoint omits these to stay small).
+  const params = new URLSearchParams({ select: "*", id: `eq.${id}`, limit: "1" });
+  try {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/${TABLE}?${params}`, {
+      headers: authHeaders,
+      signal: AbortSignal.timeout(PING_TIMEOUT_MS),
+    });
+    const text = await r.text();
+    if (!r.ok) return sendJson(res, 502, { error: `Supabase ${r.status}: ${text.slice(0, 300)}` });
+    const row = JSON.parse(text)?.[0];
+    if (!row) return sendJson(res, 404, { error: "memori tidak ditemukan" });
+    return sendJson(res, 200, row);
+  } catch (e) {
+    return sendJson(res, 502, { error: `gagal membaca dari Supabase: ${e.message}` });
+  }
+}
+
 /** Lightweight REST call that keeps the Supabase project from auto-pausing. */
 async function pingSupabase() {
   if (!configured) {
@@ -174,6 +194,8 @@ const server = http.createServer((req, res) => {
   }
   if (req.method === "POST" && url.pathname === "/memory") return void handleInsert(req, res);
   if (req.method === "GET" && url.pathname === "/memory") return void handleList(res, url);
+  const detail = url.pathname.match(/^\/memory\/([^/]+)$/);
+  if (req.method === "GET" && detail) return void handleDetail(res, detail[1]);
   return sendJson(res, 404, { error: "not found" });
 });
 

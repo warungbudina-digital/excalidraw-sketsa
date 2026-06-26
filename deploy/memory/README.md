@@ -102,7 +102,8 @@ fetch("/memory/memory", {
 | Method | Path            | Purpose                                  |
 |--------|-----------------|------------------------------------------|
 | POST   | `/memory/memory`| Insert one turn → `{id}`                 |
-| GET    | `/memory/memory?limit=50&q=flowchart` | Recent turns (newest first) |
+| GET    | `/memory/memory?limit=50&q=flowchart` | Recent turns, summary fields (no `response`) |
+| GET    | `/memory/memory/<id>` | One full turn incl. `response` + `scene_snapshot` |
 | GET    | `/memory/healthz` | Liveness + last keep-alive result      |
 
 ## Keep-alive
